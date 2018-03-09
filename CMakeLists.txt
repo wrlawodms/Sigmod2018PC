@@ -23,7 +23,7 @@ if (CMAKE_BUILD_TYPE MATCHES "[Dd][Ee][Bb][Uu][Gg]" OR FORCE_TESTS)
 endif()
 
 add_executable(Driver main.cpp)
-target_link_libraries(Driver database)
+target_link_libraries(Driver database pthread tbb)
 
 # Interactive command line tool to translate our query format to SQL queries
 add_executable(Query2SQL Query2SQL.cpp)

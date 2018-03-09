@@ -7,6 +7,7 @@
 #include <unordered_set>
 #include <vector>
 #include <set>
+#include "tbb/concurrent_unordered_map.h"
 #include "Relation.hpp"
 #include "Parser.hpp"
 //---------------------------------------------------------------------------
@@ -40,7 +41,7 @@ public:
     virtual std::vector<uint64_t*> getResults();
     /// The result size
     uint64_t resultSize=0;
-    /// The destructor
+    ///he destructor
     virtual ~Operator() {};
 };
 //---------------------------------------------------------------------------
@@ -95,7 +96,8 @@ class Join : public Operator {
     /// Create mapping for bindings
     void createMappingForBindings();
 
-    using HT=std::unordered_multimap<uint64_t,uint64_t>;
+    //using HT=std::unordered_multimap<uint64_t,uint64_t>;
+    using HT=tbb::concurrent_unordered_multimap<uint64_t,uint64_t>;
 
     /// The hash table for the join
     HT hashTable;
@@ -108,7 +110,7 @@ class Join : public Operator {
     /// The entire input data of left and right
     std::vector<uint64_t*> leftInputData,rightInputData;
     /// The input data that has to be copied
-    std::vector<uint64_t*>copyLeftData,copyRightData;
+    std::vector<uint64_t*> copyLeftData,copyRightData;
 
 public:
     /// The constructor
@@ -118,6 +120,19 @@ public:
     /// Run
     void run() override;
 };
+//---------------------------------------------------------------------------
+/*class PartitioningJoin : public Operaotor {
+
+
+public:
+    /// The constructor
+    Join(std::unique_ptr<Operator>&& left,std::unique_ptr<Operator>&& right,PredicateInfo& pInfo) : left(std::move(left)), right(std::move(right)), pInfo(pInfo) {};
+    /// Require a column and add it to results
+    bool require(SelectInfo info) override;
+    /// Run
+    void run() override;
+
+}*/
 //---------------------------------------------------------------------------
 class SelfJoin : public Operator {
     /// The input operators
@@ -132,7 +147,7 @@ class SelfJoin : public Operator {
     /// The entire input data
     std::vector<uint64_t*> inputData;
     /// The input data that has to be copied
-    std::vector<uint64_t*>copyData;
+    std::vector<uint64_t*> copyData;
 
 public:
     /// The constructor

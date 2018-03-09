@@ -1,6 +1,8 @@
 #include <Operators.hpp>
 #include <cassert>
 #include <iostream>
+#include <thread>
+#include <mutex>
 //---------------------------------------------------------------------------
 using namespace std;
 //---------------------------------------------------------------------------
@@ -115,6 +117,7 @@ bool Join::require(SelectInfo info)
 void Join::copy2Result(uint64_t leftId,uint64_t rightId)
 // Copy to result
 {
+    //if array, cache util is better, becaouse now, each columns in tmpResults are seperated
     unsigned relColId=0;
     for (unsigned cId=0;cId<copyLeftData.size();++cId)
         tmpResults[relColId++].push_back(copyLeftData[cId][leftId]);
@@ -159,19 +162,101 @@ void Join::run()
 
     // Build phase
     auto leftKeyColumn=leftInputData[leftColId];
-    hashTable.reserve(left->resultSize*2);
-    for (uint64_t i=0,limit=i+left->resultSize;i!=limit;++i) {
-        hashTable.emplace(leftKeyColumn[i],i);
+    //hashTable.reserve(left->resultSize*2);
+   
+    vector<thread> workers;
+    const int thread_num = 40;
+    uint64_t limit = left->resultSize;
+    
+
+    for (int i=0; i<thread_num; i++) {
+        int length = limit/(thread_num-1);
+        int start = i*length;
+        if ( i == thread_num-1) {
+            length = limit%(thread_num-1);
+        }
+        if (length == 0)
+            continue;
+        workers.push_back(thread([&, start, length](){ 
+            for (uint64_t i=start,limit=start+length;i!=limit;++i) {        
+                hashTable.insert(make_pair(leftKeyColumn[i],i));
+            }
+        }));
     }
+    for (auto& worker : workers) {
+        worker.join();
+    }
+
     // Probe phase
     auto rightKeyColumn=rightInputData[rightColId];
-    for (uint64_t i=0,limit=i+right->resultSize;i!=limit;++i) {
+
+    limit = right->resultSize;    
+    vector<thread> workers2;
+    
+    mutex mt;
+    for (int i=0; i<thread_num; i++) {
+        int length = limit/(thread_num-1);
+        int start = i*length;
+        if (i == thread_num-1) {
+            length = limit%(thread_num-1);
+        }
+        if (length == 0)
+            continue;
+        workers2.push_back(thread([&, start, length](){ 
+            vector<vector<uint64_t>> localResults;
+            for (unsigned i=0; i<requestedColumns.size(); i++)
+                localResults.emplace_back();
+            for (uint64_t i=start,limit=start+length;i!=limit;++i) {        
+                auto rightKey=rightKeyColumn[i];
+                auto range=hashTable.equal_range(rightKey);
+                for (auto iter=range.first;iter!=range.second;++iter) {
+                    //copy2Result(iter->second,i);
+                    unsigned relColId=0;
+                    
+                    for (unsigned cId=0;cId<copyLeftData.size();++cId)
+                        localResults[relColId++].push_back(copyLeftData[cId][iter->second]);
+
+                    for (unsigned cId=0;cId<copyRightData.size();++cId)
+                        localResults[relColId++].push_back(copyRightData[cId][i]);
+                }
+            }
+            
+            mt.lock();
+            //tmpResults.insert(tmpResults.end(), localResults.begin(), localResults.end());
+            for (unsigned i=0; i<requestedColumns.size(); i++)  {
+                tmpResults[i].insert(tmpResults[i].end(), localResults[i].begin(), localResults[i].end());
+            }
+            resultSize += localResults[0].size();
+            mt.unlock();
+            
+        }));
+    }/*
+    start = thread_num*length;
+    length = limit%thread_num;
+    workers2.push_back(thread([&, start, length](){ 
+        for (uint64_t i=start,limit=start+length;i!=limit;++i) {
+            auto rightKey=rightKeyColumn[i];
+            auto range=hashTable.equal_range(rightKey);
+            for (auto iter=range.first;iter!=range.second;++iter) {
+                copy2Result(iter->second,i);
+            }
+        }
+    }));
+    */
+        //workers[workers.size()-1].join();
+    for (auto& worker : workers2) {
+        worker.join();
+    }
+    
+     /*
+    for (uint64_t i=0,limit=right->resultSize;i!=limit;++i) {
         auto rightKey=rightKeyColumn[i];
         auto range=hashTable.equal_range(rightKey);
         for (auto iter=range.first;iter!=range.second;++iter) {
             copy2Result(iter->second,i);
         }
     }
+    */
 }
 //---------------------------------------------------------------------------
 void SelfJoin::copy2Result(uint64_t id)
@@ -239,4 +324,12 @@ void Checksum::run()
         checkSums.push_back(sum);
     }
 }
+/*
+//---------------------------------------------------------------------------
+void PartitioningJoin::require(SelectInfo info) {
+}
+//---------------------------------------------------------------------------
+void PartitioningJoin::run() {
+}
+*/
 //---------------------------------------------------------------------------
