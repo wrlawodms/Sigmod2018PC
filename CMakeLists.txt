@@ -8,6 +8,8 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 # set(CMAKE_CXX_COMPILER /usr/local/bin/g++)
 set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -g -fsanitize=address -Wall")
 
+set(CMAKE_CXX_FLAGS_RELEASE "-O3")
+
 include_directories(include)
 
 

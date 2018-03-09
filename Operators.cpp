@@ -22,8 +22,9 @@ void Operator::finishAsyncRun(boost::asio::io_service& ioService, bool startPare
 bool Scan::require(SelectInfo info)
 // Require a column and add it to results
 {
-    if (info.binding!=relationBinding)
+    if (info.binding!=relationBinding)  {
         return false;
+    }
     assert(info.colId<relation.columns.size());
     resultColumns.push_back(relation.columns[info.colId]);
     select2ResultColId[info]=resultColumns.size()-1;
@@ -41,7 +42,6 @@ void Scan::asyncRun(boost::asio::io_service& ioService) {
     pendingAsyncOperator = 1;
     run();
     finishAsyncRun(ioService, true);
-//    cout << "Scan::asyncRun" << endl;
 }
 //---------------------------------------------------------------------------
 vector<uint64_t*> Scan::getResults()
@@ -83,6 +83,7 @@ bool FilterScan::applyFilter(uint64_t i,FilterInfo& f)
         case FilterInfo::Comparison::Equal:
             return compareCol[i]==constant;
         case FilterInfo::Comparison::Greater:
+    __sync_synchronize();
             return compareCol[i]>constant;
         case FilterInfo::Comparison::Less:
             return compareCol[i]<constant;
@@ -114,7 +115,6 @@ void FilterScan::asyncRun(boost::asio::io_service& ioService) {
 void FilterScan::createAsyncTasks(boost::asio::io_service& ioService) {
     // can be parallize
     ioService.post([&]() {
-//        cout << "FilterScanTask" << endl;
         run();
         finishAsyncRun(ioService, true);
     });        
@@ -165,9 +165,11 @@ void Join::copy2Result(uint64_t leftId,uint64_t rightId)
     ++resultSize;
 }
 //---------------------------------------------------------------------------
+/*
 void Join::run()
   // Run
 {
+    */
     /*
   if (runInput) {
      left->require(pInfo.left);
@@ -177,15 +179,14 @@ void Join::run()
    }
 */
   // Use smaller input for build
+  /*
   if (left->resultSize>right->resultSize) {
     swap(left,right);
     swap(pInfo.left,pInfo.right);
     swap(requestedColumnsLeft,requestedColumnsRight);
   }
-  cout << "before getResults" << endl;
   auto leftInputData=left->getResults();
   auto rightInputData=right->getResults();
-  cout << "after getResults" << endl;
 
   // Resolve the input columns
   unsigned resColId=0;
@@ -197,21 +198,16 @@ void Join::run()
     copyRightData.push_back(rightInputData[right->resolve(info)]);
     select2ResultColId[info]=resColId++;
   }
-  cout << "after copyData" << endl;
 
   auto leftColId=left->resolve(pInfo.left);
   auto rightColId=right->resolve(pInfo.right);
 
-  cout << "after resolve, " << leftInputData.size() << " " << leftColId << " " <<  endl;
   // Build phase
   auto leftKeyColumn=leftInputData[leftColId];
-  cout << "after leftInputData[leftColId]" << endl;
   //hashTable.reserve(left->resultSize*2);
   for (uint64_t i=0,limit=i+left->resultSize;i!=limit;++i) {
     hashTable.emplace(leftKeyColumn[i],i);
-    //cout << "after for" << l;
   }
-  cout << "after probing" << endl;
   // Probe phase
   auto rightKeyColumn=rightInputData[rightColId];
   for (uint64_t i=0,limit=i+right->resultSize;i!=limit;++i) {
@@ -221,18 +217,18 @@ void Join::run()
       copy2Result(iter->second,i);
     }
   }
-}
+}*/
 
-//void Join::run()
+void Join::run()
 // Run
-//{
+{
     /*
     left->require(pInfo.left);
     right->require(pInfo.right);
     left->run();
     right->run();
 */
-/*
+
     // Use smaller input for build
     if (left->resultSize>right->resultSize) {
         swap(left,right);
@@ -262,7 +258,7 @@ void Join::run()
     //hashTable.reserve(left->resultSize*2);
    
     vector<thread> workers;
-    const int thread_num = 2;
+    const int thread_num = 20;
     uint64_t limit = left->resultSize;
     
 
@@ -333,7 +329,7 @@ void Join::run()
     }
     
 }
-*/
+
 //---------------------------------------------------------------------------
 void Join::asyncRun(boost::asio::io_service& ioService) {
     pendingAsyncOperator = 2;
@@ -342,7 +338,6 @@ void Join::asyncRun(boost::asio::io_service& ioService) {
     __sync_synchronize();
     left->asyncRun(ioService);
     right->asyncRun(ioService);
-//    cout << "Join::asyncRun" << endl;
 }
 
 //---------------------------------------------------------------------------
@@ -350,7 +345,6 @@ void Join::createAsyncTasks(boost::asio::io_service& ioService) {
     assert (pendingAsyncOperator==0);
     // can be parallize
     ioService.post([&]() {
-//        cout << "Join::Task" << endl;
         run(); // call parallized task 
         finishAsyncRun(ioService, true);
     });        
@@ -431,7 +425,7 @@ void Checksum::run()
 // Run
 {
     /*
-    for (auto& sInfo : colInfo) {
+    for (auto& sInfo : yncOperatorolInfo) {
         input->require(sInfo);
     }
     input->run();
