@@ -1,10 +1,22 @@
-#include <Operators.hpp>
+#include "Operators.hpp"
 #include <cassert>
 #include <iostream>
 #include <thread>
 #include <mutex>
 //---------------------------------------------------------------------------
 using namespace std;
+
+void Operator::finishAsyncRun(boost::asio::io_service& ioService, bool startParentAsync) {
+    if (auto p = parent.lock()) {
+        int pending = __sync_sub_and_fetch(&p->pendingAsyncOperator, 1);
+        if (pending == 0 && startParentAsync) 
+            p->createAsyncTasks(ioService);
+    } else {
+        // root node
+    }
+    
+}
+
 //---------------------------------------------------------------------------
 bool Scan::require(SelectInfo info)
 // Require a column and add it to results
@@ -22,6 +34,12 @@ void Scan::run()
 {
 // Nothing to do
     resultSize=relation.size;
+}
+//---------------------------------------------------------------------------
+void Scan::asyncRun(boost::asio::io_service& ioService) {
+    pendingAsyncOperator = 1;
+    run();
+    finishAsyncRun(ioService, true);
 }
 //---------------------------------------------------------------------------
 vector<uint64_t*> Scan::getResults()
@@ -83,6 +101,22 @@ void FilterScan::run()
     }
 }
 //---------------------------------------------------------------------------
+void FilterScan::asyncRun(boost::asio::io_service& ioService) {
+    pendingAsyncOperator = 1;
+    __sync_synchronize();
+    createAsyncTasks(ioService);  
+}
+
+//---------------------------------------------------------------------------
+void FilterScan::createAsyncTasks(boost::asio::io_service& ioService) {
+    // can be parallize
+    ioService.post([&]() {
+        run();
+        finishAsyncRun(ioService, true);
+    });        
+}
+
+//---------------------------------------------------------------------------
 vector<uint64_t*> Operator::getResults()
 // Get materialized results
 {
@@ -130,11 +164,12 @@ void Join::copy2Result(uint64_t leftId,uint64_t rightId)
 void Join::run()
 // Run
 {
+    /*
     left->require(pInfo.left);
     right->require(pInfo.right);
     left->run();
     right->run();
-
+*/
 
     // Use smaller input for build
     if (left->resultSize>right->resultSize) {
@@ -222,7 +257,6 @@ void Join::run()
             }
             
             mt.lock();
-            //tmpResults.insert(tmpResults.end(), localResults.begin(), localResults.end());
             for (unsigned i=0; i<requestedColumns.size(); i++)  {
                 tmpResults[i].insert(tmpResults[i].end(), localResults[i].begin(), localResults[i].end());
             }
@@ -230,33 +264,33 @@ void Join::run()
             mt.unlock();
             
         }));
-    }/*
-    start = thread_num*length;
-    length = limit%thread_num;
-    workers2.push_back(thread([&, start, length](){ 
-        for (uint64_t i=start,limit=start+length;i!=limit;++i) {
-            auto rightKey=rightKeyColumn[i];
-            auto range=hashTable.equal_range(rightKey);
-            for (auto iter=range.first;iter!=range.second;++iter) {
-                copy2Result(iter->second,i);
-            }
-        }
-    }));
-    */
-        //workers[workers.size()-1].join();
+    }
+  
     for (auto& worker : workers2) {
         worker.join();
     }
     
-     /*
-    for (uint64_t i=0,limit=right->resultSize;i!=limit;++i) {
-        auto rightKey=rightKeyColumn[i];
-        auto range=hashTable.equal_range(rightKey);
-        for (auto iter=range.first;iter!=range.second;++iter) {
-            copy2Result(iter->second,i);
-        }
-    }
-    */
+}
+//---------------------------------------------------------------------------
+void Join::asyncRun(boost::asio::io_service& ioService) {
+    pendingAsyncOperator = 2;
+    __sync_synchronize();
+    left->require(pInfo.left);
+    right->require(pInfo.right);
+    left->asyncRun(ioService);
+    right->asyncRun(ioService);
+}
+
+//---------------------------------------------------------------------------
+void Join::createAsyncTasks(boost::asio::io_service& ioService) {
+    assert (pendingAsyncOperator==0);
+    // can be parallize
+    ioService.post([&]() {
+        run(); // call parallized task 
+        finishAsyncRun(ioService, true);
+    });        
+
+            
 }
 //---------------------------------------------------------------------------
 void SelfJoin::copy2Result(uint64_t id)
@@ -283,9 +317,11 @@ bool SelfJoin::require(SelectInfo info)
 void SelfJoin::run()
 // Run
 {
+    /*
     input->require(pInfo.left);
     input->require(pInfo.right);
     input->run();
+    */
     inputData=input->getResults();
 
     for (auto& iu : requiredIUs) {
@@ -305,13 +341,34 @@ void SelfJoin::run()
     }
 }
 //---------------------------------------------------------------------------
+void SelfJoin::asyncRun(boost::asio::io_service& ioService) {
+    pendingAsyncOperator = 1;
+    __sync_synchronize();
+    input->require(pInfo.left);
+    input->require(pInfo.right);
+    input->asyncRun(ioService);
+}
+
+//---------------------------------------------------------------------------
+void SelfJoin::createAsyncTasks(boost::asio::io_service& ioService) {
+    assert (pendingAsyncOperator==0);
+    // can be parallize
+    ioService.post([&]() {
+        run(); // call parallized task 
+        finishAsyncRun(ioService, true);
+    });        
+            
+}
+//---------------------------------------------------------------------------
 void Checksum::run()
 // Run
 {
+    /*
     for (auto& sInfo : colInfo) {
         input->require(sInfo);
     }
     input->run();
+    */
     auto results=input->getResults();
 
     for (auto& sInfo : colInfo) {
@@ -323,6 +380,33 @@ void Checksum::run()
             sum+=*iter;
         checkSums.push_back(sum);
     }
+}
+//---------------------------------------------------------------------------
+void Checksum::asyncRun(boost::asio::io_service& ioService, int queryIndex) {
+    this->queryIndex = queryIndex;
+    pendingAsyncOperator = 1;
+    __sync_synchronize();
+    for (auto& sInfo : colInfo) {
+        input->require(sInfo);
+    }
+    input->asyncRun(ioService);
+}
+
+//---------------------------------------------------------------------------
+void Checksum::createAsyncTasks(boost::asio::io_service& ioService) {
+    assert (pendingAsyncOperator==0);
+    // can be parallize
+    ioService.post([&]() {
+        run(); // call parallized task 
+        finishAsyncRun(ioService, false);
+    });        
+            
+}
+void Checksum::finishAsyncRun(boost::asio::io_service& ioService, bool startParentAsync) {
+    joiner.asyncResults[queryIndex] = std::move(checkSums);
+    int pending = __sync_sub_and_fetch(&joiner.pendingAsyncJoin, 1);
+    if (pending == 0)
+        joiner.cvAsync.notify_one();
 }
 /*
 //---------------------------------------------------------------------------

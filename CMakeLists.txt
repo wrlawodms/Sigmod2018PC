@@ -19,11 +19,13 @@ target_include_directories(database PUBLIC
 
 OPTION(FORCE_TESTS "Build tests, regardless of build type." ON)
 if (CMAKE_BUILD_TYPE MATCHES "[Dd][Ee][Bb][Uu][Gg]" OR FORCE_TESTS)
-    add_subdirectory(test)
+    #add_subdirectory(test)
 endif()
 
+link_directories(${CMAKE_SOURCE_DIR}/lib)
+
 add_executable(Driver main.cpp)
-target_link_libraries(Driver database pthread tbb)
+target_link_libraries(Driver database boost_system boost_thread tbb pthread)
 
 # Interactive command line tool to translate our query format to SQL queries
 add_executable(Query2SQL Query2SQL.cpp)
