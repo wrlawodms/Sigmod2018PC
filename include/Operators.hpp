@@ -14,7 +14,9 @@
 #include "tbb/concurrent_unordered_map.h"
 #include "Relation.hpp"
 #include "Parser.hpp"
-#include "Joiner.hpp"
+//#include "Joiner.hpp"
+
+class Joiner;
 
 //---------------------------------------------------------------------------
 namespace std {
@@ -52,7 +54,7 @@ public:
     /// only call it if pendingAsyncOperator=0, and can getResults()
     virtual void createAsyncTasks(boost::asio::io_service& ioService) { throw; }
     /// SetParnet
-    void setParent(std::shared_ptr<Operator>& parent) { this->parent = parent; }
+    void setParent(std::shared_ptr<Operator> parent) { this->parent = parent; }
     /// Get  materialized results
     virtual std::vector<uint64_t*> getResults();
     /// The result size
@@ -112,7 +114,7 @@ class Join : public Operator {
     /// The input operators
     std::shared_ptr<Operator> left, right;
     /// The join predicate info
-    PredicateInfo& pInfo;
+    PredicateInfo pInfo;
     /// Copy tuple to result
     void copy2Result(uint64_t leftId,uint64_t rightId);
     /// Create mapping for bindings
@@ -136,7 +138,7 @@ class Join : public Operator {
 
 public:
     /// The constructor
-    Join(std::shared_ptr<Operator>& left,std::shared_ptr<Operator>& right,PredicateInfo& pInfo) : left(left), right(right), pInfo(pInfo) {};
+    Join(std::shared_ptr<Operator>& left,std::shared_ptr<Operator>& right,PredicateInfo pInfo) : left(left), right(right), pInfo(pInfo) {};
     /// Require a column and add it to results
     bool require(SelectInfo info) override;
     /// Run
@@ -164,7 +166,7 @@ class SelfJoin : public Operator {
     /// The input operators
     std::shared_ptr<Operator> input;
     /// The join predicate info
-    PredicateInfo& pInfo;
+    PredicateInfo pInfo;
     /// Copy tuple to result
     void copy2Result(uint64_t id);
     /// The required IUs
@@ -177,7 +179,7 @@ class SelfJoin : public Operator {
 
 public:
     /// The constructor
-    SelfJoin(std::shared_ptr<Operator>& input,PredicateInfo& pInfo) : input(input), pInfo(pInfo) {};
+    SelfJoin(std::shared_ptr<Operator>& input,PredicateInfo pInfo) : input(input), pInfo(pInfo) {};
     /// Require a column and add it to results
     bool require(SelectInfo info) override;
     /// Run
@@ -193,14 +195,14 @@ class Checksum : public Operator {
     /// The input operator
     std::shared_ptr<Operator> input;
     /// The join predicate info
-    std::vector<SelectInfo>& colInfo;
+    std::vector<SelectInfo> colInfo;
     /// Query Index
     int queryIndex;
 
 public:
     std::vector<uint64_t> checkSums;
     /// The constructor
-    Checksum(Joiner& joiner, std::shared_ptr<Operator>& input,std::vector<SelectInfo>& colInfo) : joiner(joiner), input(input), colInfo(colInfo) {};
+    Checksum(Joiner& joiner, std::shared_ptr<Operator>& input,std::vector<SelectInfo> colInfo) : joiner(joiner), input(input), colInfo(colInfo) {};
     /// Request a column and add it to results
     bool require(SelectInfo info) override { throw; /* check sum is always on the highest level and thus should never request anything */ }
     /// Run

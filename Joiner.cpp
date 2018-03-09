@@ -8,19 +8,9 @@
 #include <sstream>
 #include <vector>
 #include "Parser.hpp"
-#include "Operators.hpp"
+//#include "Operators.hpp"
 //---------------------------------------------------------------------------
 using namespace std;
-//---------------------------------------------------------------------------
-Joiner::Joiner(int threadNum) {
-    boost::asio::io_service::work work(ioService);
-
-    for (int i=0; i<threadNum; i++) {
-        threadPool.create_thread(
-            boost::bind(&boost::asio::io_service::run, &ioService)
-            );
-    }
-}
 //---------------------------------------------------------------------------
 void Joiner::addRelation(const char* fileName)
 // Loads a relation from disk
@@ -29,14 +19,29 @@ void Joiner::addRelation(const char* fileName)
 }
 //---------------------------------------------------------------------------
 void Joiner::waitAsyncJoins() {
-    mutex mt;
-    unique_lock<mutex> lk(mt); 
-    cvAsync.wait(lk); 
+    unique_lock<mutex> lk(cvAsyncMt);
+    if (pendingAsyncJoin > 0)  {
+        cvAsync.wait(lk); 
+    }
 }
 //---------------------------------------------------------------------------
 vector<string> Joiner::getAsyncJoinResults() { 
     vector<string> results;
 
+    stringstream out;
+    for (auto& queryResult : asyncResults) {
+        for (unsigned i=0;i<queryResult.size();++i) {
+            out << (queryResult[i]==0?"NULL":to_string(queryResult[i]));
+            if (i<queryResult.size()-1)
+                out << " ";
+        }
+        out << "\n";
+        results.push_back(out.str());
+        out.str("");
+    }
+    asyncResults.clear();
+    asyncJoins.clear();
+    nextQueryIndex = 0;
     
     return results;
 }
@@ -128,20 +133,22 @@ string Joiner::join(QueryInfo& query, bool async)
         };
     }
 
-    Checksum checkSum(*this, root, query.selections);
+    std::shared_ptr<Checksum> checkSum = std::make_shared<Checksum>(*this, root, query.selections);
+    root->setParent(checkSum);
     if (async) {
-        int qurey_index = __sync_fetch_and_add(&pendingAsyncJoin, 1);
+        __sync_fetch_and_add(&pendingAsyncJoin, 1);
         asyncResults.emplace_back();
-        checkSum.asyncRun(ioService, query_index);
-        return NULL;
+        checkSum->asyncRun(ioService, nextQueryIndex++);
+        asyncJoins.push_back(std::move(checkSum));
+        return "";
     }
 
-    checkSum.run();
+    checkSum->run();
 
     stringstream out;
-    auto& results=checkSum.checkSums;
+    auto& results=checkSum->checkSums;
     for (unsigned i=0;i<results.size();++i) {
-        out << (checkSum.resultSize==0?"NULL":to_string(results[i]));
+        out << (checkSum->resultSize==0?"NULL":to_string(results[i]));
         if (i<results.size()-1)
             out << " ";
     }
