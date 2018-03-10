@@ -21,7 +21,7 @@ target_include_directories(database PUBLIC
 
 OPTION(FORCE_TESTS "Build tests, regardless of build type." ON)
 if (CMAKE_BUILD_TYPE MATCHES "[Dd][Ee][Bb][Uu][Gg]" OR FORCE_TESTS)
-    #add_subdirectory(test)
+#add_subdirectory(test)
 endif()
 
 link_directories(${CMAKE_SOURCE_DIR}/lib)
@@ -39,3 +39,5 @@ add_executable(harness harness.cpp)
 ADD_CUSTOM_TARGET(link_target ALL
   COMMAND ${CMAKE_COMMAND} -E create_symlink ${CMAKE_CURRENT_SOURCE_DIR}/workloads
   ${CMAKE_CURRENT_BINARY_DIR}/workloads)
+
+#add_definitions(-DVERBOSE)

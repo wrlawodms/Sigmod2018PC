@@ -1,6 +1,7 @@
 #pragma once
 #include <fstream>
 #include "Relation.hpp"
+
 //---------------------------------------------------------------------------
 class Utils {
 public:
@@ -9,5 +10,6 @@ public:
 
     /// Store a relation in all formats
     static void storeRelation(std::ofstream& out,Relation& r,unsigned i);
+
 };
 //---------------------------------------------------------------------------

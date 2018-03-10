@@ -10,7 +10,7 @@
 #include <boost/asio/io_service.hpp>
 #include <boost/bind.hpp>
 #include <boost/thread/thread.hpp>
-
+#include <mutex>
 #include "tbb/concurrent_unordered_map.h"
 #include "Relation.hpp"
 #include "Parser.hpp"
@@ -38,11 +38,19 @@ protected:
     std::vector<uint64_t*> resultColumns;
     /// The tmp results
     std::vector<std::vector<uint64_t>> tmpResults;
+    /// mutex for local ops to global
+    std::mutex localMt;
     /// if 0, all asyncrunning input oeraotr finish.
     int pendingAsyncOperator=-1;
     virtual void finishAsyncRun(boost::asio::io_service& ioService, bool startParentAsync=false); 
 
 public:
+#ifdef VERBOSE
+    unsigned operatorIndex;
+    unsigned queryIndex;
+    void setQeuryIndex(unsigned qI) { queryIndex = qI; }
+    void setOperatorIndex(unsigned oI) { operatorIndex = oI; }
+#endif
     /// Require a column and add it to results
     virtual bool require(SelectInfo info) = 0;
     /// Resolves a column
@@ -57,6 +65,8 @@ public:
     void setParent(std::shared_ptr<Operator> parent) { this->parent = parent; }
     /// Get  materialized results
     virtual std::vector<uint64_t*> getResults();
+    /// Get materialized results size in bytes
+    virtual unsigned getResultsSize();
     /// The result size
     uint64_t resultSize=0;
     ///he destructor
@@ -81,6 +91,7 @@ public:
     virtual void asyncRun(boost::asio::io_service& ioService) override;
     /// Get  materialized results
     virtual std::vector<uint64_t*> getResults() override;
+    virtual unsigned getResultsSize() override;
 };
 //---------------------------------------------------------------------------
 class FilterScan : public Scan {
@@ -108,6 +119,8 @@ public:
     virtual void createAsyncTasks(boost::asio::io_service& ioService) override;
     /// Get  materialized results
     virtual std::vector<uint64_t*> getResults() override { return Operator::getResults(); }
+    virtual unsigned getResultsSize() override { return Operator::getResultsSize(); }
+    /// The result size
 };
 //---------------------------------------------------------------------------
 class Join : public Operator {
@@ -123,6 +136,12 @@ class Join : public Operator {
     //using HT=std::unordered_multimap<uint64_t,uint64_t>;
     using HT=tbb::concurrent_unordered_multimap<uint64_t,uint64_t>;
 
+    int pendingBuildingHashtable = -1;
+    int pendingProbingHashtable = -1;
+    
+    void buildingTask(boost::asio::io_service* ioService, std::vector<uint64_t*> lrKeys, unsigned start, unsigned length);
+    void probingTask(boost::asio::io_service* ioService, std::vector<uint64_t*> lrKeys, unsigned start, unsigned length);
+    
     /// The hash table for the join
     HT hashTable;
     /// Columns that have to be materialized

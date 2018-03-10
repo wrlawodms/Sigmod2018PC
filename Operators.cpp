@@ -4,15 +4,24 @@
 #include <thread>
 #include <mutex>
 #include "Joiner.hpp"
+#include "Config.hpp"
+#include "Utils.hpp"
+
 //---------------------------------------------------------------------------
 using namespace std;
 
 void Operator::finishAsyncRun(boost::asio::io_service& ioService, bool startParentAsync) {
     if (auto p = parent.lock()) {
         int pending = __sync_sub_and_fetch(&p->pendingAsyncOperator, 1);
+#ifdef VERBOSE
+    cout << "Operator("<< queryIndex << "," << operatorIndex <<")::finishAsyncRun parent's pending: " << pending << endl;
+#endif
         if (pending == 0 && startParentAsync) 
             p->createAsyncTasks(ioService);
     } else {
+#ifdef VERBOSE
+    cout << "Operator("<< queryIndex << "," << operatorIndex <<")::finishAsyncRun has no parent" << endl;
+#endif
         // root node
     }
     
@@ -26,9 +35,15 @@ bool Scan::require(SelectInfo info)
         return false;
     }
     assert(info.colId<relation.columns.size());
-    resultColumns.push_back(relation.columns[info.colId]);
-    select2ResultColId[info]=resultColumns.size()-1;
+    if (select2ResultColId.find(info)==select2ResultColId.end()) {
+        resultColumns.push_back(relation.columns[info.colId]);
+        select2ResultColId[info]=resultColumns.size()-1;
+    }
     return true;
+}
+//---------------------------------------------------------------------------
+unsigned Scan::getResultsSize() {
+    return resultColumns.size()*relation.size*8; 
 }
 //---------------------------------------------------------------------------
 void Scan::run()
@@ -39,6 +54,9 @@ void Scan::run()
 }
 //---------------------------------------------------------------------------
 void Scan::asyncRun(boost::asio::io_service& ioService) {
+#ifdef VERBOSE
+    cout << "Scan("<< queryIndex << "," << operatorIndex <<")::asyncRun, Task" << endl;
+#endif
     pendingAsyncOperator = 1;
     run();
     finishAsyncRun(ioService, true);
@@ -83,7 +101,6 @@ bool FilterScan::applyFilter(uint64_t i,FilterInfo& f)
         case FilterInfo::Comparison::Equal:
             return compareCol[i]==constant;
         case FilterInfo::Comparison::Greater:
-    __sync_synchronize();
             return compareCol[i]>constant;
         case FilterInfo::Comparison::Less:
             return compareCol[i]<constant;
@@ -105,6 +122,9 @@ void FilterScan::run()
 }
 //---------------------------------------------------------------------------
 void FilterScan::asyncRun(boost::asio::io_service& ioService) {
+#ifdef VERBOSE
+    cout << "FilterScan("<< queryIndex << "," << operatorIndex <<")::asyncRun" << endl;
+#endif
     pendingAsyncOperator = 1;
     __sync_synchronize();
     createAsyncTasks(ioService);  
@@ -113,8 +133,14 @@ void FilterScan::asyncRun(boost::asio::io_service& ioService) {
 
 //---------------------------------------------------------------------------
 void FilterScan::createAsyncTasks(boost::asio::io_service& ioService) {
+#ifdef VERBOSE
+    cout << "FilterScan("<< queryIndex << "," << operatorIndex <<")::createAsyncTasks" << endl;
+#endif
     // can be parallize
     ioService.post([&]() {
+#ifdef VERBOSE
+    cout << "FilterScan("<< queryIndex << "," << operatorIndex <<"):: run Task" << endl;
+#endif
         run();
         finishAsyncRun(ioService, true);
     });        
@@ -129,6 +155,15 @@ vector<uint64_t*> Operator::getResults()
         resultVector.push_back(c.data());
     }
     return resultVector;
+}
+//---------------------------------------------------------------------------
+unsigned Operator::getResultsSize() {
+    /*
+    unsigned size = 0;
+    for (auto& c : tmpResults) {
+        size += c.size()*8;
+    }*/
+    return resultSize*tmpResults.size()*8;
 }
 //---------------------------------------------------------------------------
 bool Join::require(SelectInfo info)
@@ -332,6 +367,9 @@ void Join::run()
 
 //---------------------------------------------------------------------------
 void Join::asyncRun(boost::asio::io_service& ioService) {
+#ifdef VERBOSE
+    cout << "Join("<< queryIndex << "," << operatorIndex <<")::asyncRun" << endl;
+#endif
     pendingAsyncOperator = 2;
     assert(left->require(pInfo.left));
     assert(right->require(pInfo.right));
@@ -344,13 +382,124 @@ void Join::asyncRun(boost::asio::io_service& ioService) {
 void Join::createAsyncTasks(boost::asio::io_service& ioService) {
     assert (pendingAsyncOperator==0);
     // can be parallize
-    ioService.post([&]() {
-        run(); // call parallized task 
-        finishAsyncRun(ioService, true);
-    });        
 
-            
+    if (left->resultSize>right->resultSize) {
+        swap(left,right);
+        swap(pInfo.left,pInfo.right);
+        swap(requestedColumnsLeft,requestedColumnsRight);
+    }
+
+    auto leftInputData=left->getResults();
+    auto rightInputData=right->getResults();
+
+    // Resolve the input columns
+    unsigned resColId=0;
+    for (auto& info : requestedColumnsLeft) {
+        copyLeftData.push_back(leftInputData[left->resolve(info)]);
+        select2ResultColId[info]=resColId++;
+    }
+    for (auto& info : requestedColumnsRight) {
+        copyRightData.push_back(rightInputData[right->resolve(info)]);
+        select2ResultColId[info]=resColId++;
+    }
+
+    auto leftColId=left->resolve(pInfo.left);
+    auto rightColId=right->resolve(pInfo.right);
+
+    // Build phase
+    //hashTable.reserve(left->resultSize*2);
+   
+    uint64_t limit = left->resultSize;
+    const unsigned taskNum = (left->getResultsSize()+(L2_SIZE/2-1))/(L2_SIZE/2); // just roundup
+        // @TODO cachemiis may occur when a tuple is int the middle of partitioning point
+#ifdef VERBOSE
+    cout << "Join("<< queryIndex << "," << operatorIndex <<")::createAsyncTasks left_table_size(" << left->operatorIndex <<  "): "<< limit << " tuples "<< requestedColumnsLeft.size() << " columns " <<  left->getResultsSize()/1024.0 << "KB -> create #buildingTask: "<< taskNum << endl;
+#endif
+    
+    pendingBuildingHashtable = taskNum;
+   // __sync_synchronize(); // need it?
+    uint64_t* leftKeyColumn=leftInputData[leftColId];
+    uint64_t* rightKeyColumn=rightInputData[rightColId];
+    vector<uint64_t*> lrKeys;
+    lrKeys.push_back(leftKeyColumn);
+    lrKeys.push_back(rightKeyColumn);
+    if (taskNum == 0) {
+        finishAsyncRun(ioService, true);
+    }
+    for (unsigned i=0; i<taskNum; i++) {
+        int length = limit/(taskNum);
+        int start = i*length;
+        if (length == 0) {
+            length = limit%(length);
+        }
+        ioService.post(bind(&Join::buildingTask, this, &ioService, lrKeys, start, length));
+    }
+    
+    //ioService.post([&]() {
+        //run(); // call parallized task 
+       // finishAsyncRun(ioService, true);
+    //});  
 }
+
+//---------------------------------------------------------------------------
+// lrKeys : 0 : left, 1: right 
+void Join::buildingTask(boost::asio::io_service* ioService, vector<uint64_t*> lrKeys, unsigned start, unsigned length) {
+    for (uint64_t i=start,limit=start+length;i!=limit;++i) {        
+        hashTable.insert(make_pair(lrKeys[0][i],i));
+    }
+    int remainder = __sync_sub_and_fetch(&pendingBuildingHashtable, 1);
+    if (remainder == 0) { 
+        unsigned limit = right->resultSize;
+        const unsigned taskNum = ((right->getResultsSize())+(L2_SIZE/2-1))/(L2_SIZE/2); 
+        // @TODO cachemiis may occur when a tuple is int the middle of partitioning point
+        pendingProbingHashtable = taskNum;
+#ifdef VERBOSE
+    cout << "Join("<< queryIndex << "," << operatorIndex <<")::createAsyncTasks right_table_size(" << right->operatorIndex <<  "): "<< limit << " tuples "<< requestedColumnsRight.size() << " columns " <<  right->getResultsSize()/1024.0 << "KB -> create #probingTask: "<< taskNum << endl;
+#endif
+        for (unsigned i=0; i<taskNum; i++) {
+            int length_p = limit/(taskNum);
+            int start_p = i*length_p;
+            if (length_p == 0) { //  
+                length_p = limit%(length_p);
+            }
+            ioService->post(bind(&Join::probingTask, this, ioService, lrKeys, start_p, length_p));
+        }
+        
+    }
+    
+}
+void Join::probingTask(boost::asio::io_service* ioService, vector<uint64_t*> lrKeys, unsigned start, unsigned length) { 
+    vector<vector<uint64_t>> localResults;
+    for (unsigned i=0; i<requestedColumns.size(); i++)
+        localResults.emplace_back();
+    for (uint64_t i=start,limit=start+length;i!=limit;++i) {        
+        auto rightKey=lrKeys[1][i];
+        auto range=hashTable.equal_range(rightKey);
+        for (auto iter=range.first;iter!=range.second;++iter) {
+            unsigned relColId=0; 
+            for (unsigned cId=0;cId<copyLeftData.size();++cId)
+                localResults[relColId++].push_back(copyLeftData[cId][iter->second]);
+
+            for (unsigned cId=0;cId<copyRightData.size();++cId)
+                localResults[relColId++].push_back(copyRightData[cId][i]);
+        }
+    } 
+    localMt.lock();
+    for (unsigned i=0; i<requestedColumns.size(); i++)  {
+        tmpResults[i].insert(tmpResults[i].end(), localResults[i].begin(), localResults[i].end());
+    }
+    resultSize += localResults[0].size();
+    localMt.unlock();
+
+    int remainder = __sync_sub_and_fetch(&pendingProbingHashtable, 1);
+    if (remainder == 0) {
+#ifdef VERBOSE
+    cout << "Join("<< queryIndex << "," << operatorIndex <<")::asyncRun end result_table: " << resultSize << " tuples"<< endl;
+#endif
+        finishAsyncRun(*ioService, true);
+    }
+}
+
 //---------------------------------------------------------------------------
 void SelfJoin::copy2Result(uint64_t id)
 // Copy to result
@@ -401,6 +550,9 @@ void SelfJoin::run()
 }
 //---------------------------------------------------------------------------
 void SelfJoin::asyncRun(boost::asio::io_service& ioService) {
+#ifdef VERBOSE
+    cout << "SelfJoin("<< queryIndex << "," << operatorIndex <<")::asyncRun" << endl;
+#endif
     pendingAsyncOperator = 1;
     input->require(pInfo.left);
     input->require(pInfo.right);
@@ -412,8 +564,14 @@ void SelfJoin::asyncRun(boost::asio::io_service& ioService) {
 //---------------------------------------------------------------------------
 void SelfJoin::createAsyncTasks(boost::asio::io_service& ioService) {
     assert (pendingAsyncOperator==0);
+#ifdef VERBOSE
+    cout << "SelfJoin("<< queryIndex << "," << operatorIndex <<")::createAsyncTasks" << endl;
+#endif
     // can be parallize
     ioService.post([&]() {
+#ifdef VERBOSE
+    cout << "SelfJoin("<< queryIndex << "," << operatorIndex <<"):: run task" << endl;
+#endif
 //        cout << "SelfJoin::Task" << endl;
         run(); // call parallized task 
         finishAsyncRun(ioService, true);
@@ -444,6 +602,9 @@ void Checksum::run()
 }
 //---------------------------------------------------------------------------
 void Checksum::asyncRun(boost::asio::io_service& ioService, int queryIndex) {
+#ifdef VERBOSE
+    cout << "Checksum(" << queryIndex << "," << operatorIndex << ")::asyncRun()" << endl;
+#endif
     this->queryIndex = queryIndex;
     pendingAsyncOperator = 1;
     for (auto& sInfo : colInfo) {
@@ -457,8 +618,14 @@ void Checksum::asyncRun(boost::asio::io_service& ioService, int queryIndex) {
 //---------------------------------------------------------------------------
 void Checksum::createAsyncTasks(boost::asio::io_service& ioService) {
     assert (pendingAsyncOperator==0);
+#ifdef VERBOSE
+    cout << "Checksum(" << queryIndex << "," << operatorIndex <<  ")::createAsyncTasks" << endl;
+#endif
     // can be parallize
     ioService.post([&]() {
+#ifdef VERBOSE
+    cout << "Checksum("<< queryIndex << "," << operatorIndex <<"):: run task" << endl;
+#endif
         run(); // call parallized task 
         finishAsyncRun(ioService, false);
 //        cout << "Checksum::Task" << endl;
@@ -469,6 +636,9 @@ void Checksum::finishAsyncRun(boost::asio::io_service& ioService, bool startPare
     joiner.asyncResults[queryIndex] = std::move(checkSums);
     int pending = __sync_sub_and_fetch(&joiner.pendingAsyncJoin, 1);
     if (pending == 0) {
+#ifdef VERBOSE
+        cout << "Checksum: finish query index: " << queryIndex << endl;
+#endif
         unique_lock<mutex> lk(joiner.cvAsyncMt); // guard for missing notification
         joiner.cvAsync.notify_one();
     }

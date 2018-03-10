@@ -1,8 +1,7 @@
 #include <iostream>
 #include "Joiner.hpp"
 #include "Parser.hpp"
-
-#define THREAD_NUM 40
+#include "Config.hpp"
 
 using namespace std;
 //---------------------------------------------------------------------------

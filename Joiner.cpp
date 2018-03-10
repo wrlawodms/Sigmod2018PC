@@ -21,7 +21,13 @@ void Joiner::addRelation(const char* fileName)
 void Joiner::waitAsyncJoins() {
     unique_lock<mutex> lk(cvAsyncMt);
     if (pendingAsyncJoin > 0)  {
+#ifdef VERBOSE
+    cout << "Joiner::waitAsyncJoins wait" << endl;
+#endif
         cvAsync.wait(lk); 
+#ifdef VERBOSE
+    cout << "Joiner::waitAsyncJoins wakeup" << endl;
+#endif
     }
 }
 //---------------------------------------------------------------------------
@@ -39,6 +45,9 @@ vector<string> Joiner::getAsyncJoinResults() {
         results.push_back(out.str());
         out.str("");
     }
+#ifdef VERBOSE
+    cout << "Joiner::getAsnyJoinResults "<< nextQueryIndex-1 << " queries are processed." << endl;
+#endif
     asyncResults.clear();
     asyncJoins.clear();
     nextQueryIndex = 0;
@@ -96,6 +105,15 @@ string Joiner::join(QueryInfo& query, bool async)
     auto left=addScan(usedRelations,firstJoin.left,query);
     auto right=addScan(usedRelations,firstJoin.right,query);
     shared_ptr<Operator> root=make_shared<Join>(left, right,firstJoin);
+#ifdef VERBOSE
+    unsigned opIdx = 0;
+    left->setOperatorIndex(opIdx++);
+    right->setOperatorIndex(opIdx++);
+    root->setOperatorIndex(opIdx++);
+    left->setQeuryIndex(nextQueryIndex);
+    right->setQeuryIndex(nextQueryIndex);
+    root->setQeuryIndex(nextQueryIndex);
+#endif
     left->setParent(root);
     right->setParent(root); 
 
@@ -108,6 +126,12 @@ string Joiner::join(QueryInfo& query, bool async)
                 left=root;
                 right=addScan(usedRelations,rightInfo,query);
                 root=make_shared<Join>(left, right,pInfo);
+#ifdef VERBOSE
+                right->setOperatorIndex(opIdx++);
+                root->setOperatorIndex(opIdx++);
+                right->setQeuryIndex(nextQueryIndex);
+                root->setQeuryIndex(nextQueryIndex);
+#endif
                 left->setParent(root);
                 right->setParent(root);
                 break;
@@ -115,6 +139,12 @@ string Joiner::join(QueryInfo& query, bool async)
                 left=addScan(usedRelations,leftInfo,query);
                 right=root;
                 root=make_shared<Join>(left,right,pInfo);
+#ifdef VERBOSE
+                left->setOperatorIndex(opIdx++);
+                root->setOperatorIndex(opIdx++);
+                left->setQeuryIndex(nextQueryIndex);
+                root->setQeuryIndex(nextQueryIndex);
+#endif
                 left->setParent(root);
                 right->setParent(root);
                 break;
@@ -123,6 +153,10 @@ string Joiner::join(QueryInfo& query, bool async)
                 // Thus, we have either a cycle in our join graph or more than one join predicate per join.
                 left = root;
                 root=make_shared<SelfJoin>(left,pInfo);
+#ifdef VERBOSE
+                root->setOperatorIndex(opIdx++);
+                root->setQeuryIndex(nextQueryIndex);
+#endif
                 left->setParent(root);
                 break;
             case QueryGraphProvides::None:
@@ -134,10 +168,16 @@ string Joiner::join(QueryInfo& query, bool async)
     }
 
     std::shared_ptr<Checksum> checkSum = std::make_shared<Checksum>(*this, root, query.selections);
+#ifdef VERBOSE
+        checkSum->setOperatorIndex(opIdx++);
+#endif
     root->setParent(checkSum);
     if (async) {
         __sync_fetch_and_add(&pendingAsyncJoin, 1);
         asyncResults.emplace_back();
+#ifdef VERBOSE
+        cout << "Joiner: Query runs asynchrounously: " << nextQueryIndex << endl; 
+#endif
         checkSum->asyncRun(ioService, nextQueryIndex++);
         asyncJoins.push_back(std::move(checkSum));
         return "";
