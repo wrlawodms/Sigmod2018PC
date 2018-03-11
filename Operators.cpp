@@ -46,6 +46,10 @@ unsigned Scan::getResultsSize() {
     return resultColumns.size()*relation.size*8; 
 }
 //---------------------------------------------------------------------------
+unsigned Scan::getResultTupleSize() {
+    return resultColumns.size()*8; 
+}
+//---------------------------------------------------------------------------
 void Scan::run()
 // Run
 {
@@ -137,13 +141,59 @@ void FilterScan::createAsyncTasks(boost::asio::io_service& ioService) {
     cout << "FilterScan("<< queryIndex << "," << operatorIndex <<")::createAsyncTasks" << endl;
 #endif
     // can be parallize
-    ioService.post([&]() {
+   
+     
+    const unsigned partitionSize = L2_SIZE/2;
+    const unsigned taskNum = CNT_PARTITIONS(relation.size*relation.columns.size()*8, partitionSize);
+    pendingTask = taskNum;
+    __sync_synchronize(); 
+    unsigned length = partitionSize/(relation.columns.size()*8); 
+    for (unsigned i=0; i<taskNum; i++) {
+        unsigned start = i*length;
+        if ( i == taskNum-1) {
+            length = relation.size%length;
+        }
+        ioService.post(bind(&FilterScan::filterTask, this, &ioService, start, length)); 
+        /*
+        ioService.post([&, start, legnth]() {
 #ifdef VERBOSE
-    cout << "FilterScan("<< queryIndex << "," << operatorIndex <<"):: run Task" << endl;
+            cout << "FilterScan("<< queryIndex << "," << operatorIndex <<")::Task start: " << start << " length: " << length << endl;
 #endif
-        run();
-        finishAsyncRun(ioService, true);
-    });        
+            
+            finishAsyncRun(ioService, true);
+        });  
+        */      
+    }
+}
+//---------------------------------------------------------------------------
+void FilterScan::filterTask(boost::asio::io_service* ioService, unsigned start, unsigned length) {
+     
+    vector<vector<uint64_t>> localResults;
+    for (unsigned i=0; i<inputData.size(); i++) {
+        localResults.emplace_back();
+    }
+    for (unsigned i=start;i<start+length;++i) {
+        bool pass=true;
+        for (auto& f : filters) {
+            pass&=applyFilter(i,f);
+        }
+        if (pass) {
+            for (unsigned cId=0;cId<inputData.size();++cId)
+                localResults[cId].push_back(inputData[cId][i]);
+        }
+    }
+    
+    localMt.lock();
+    for (unsigned cId=0;cId<inputData.size();++cId) {
+        tmpResults[cId].insert(tmpResults[cId].end(), localResults[cId].begin(), localResults[cId].end()); 
+    }
+    resultSize += localResults[0].size();
+    localMt.unlock();
+
+    int remainder = __sync_sub_and_fetch(&pendingTask, 1);
+    if (remainder == 0) {
+        finishAsyncRun(*ioService, true);
+    }
 }
 
 //---------------------------------------------------------------------------
@@ -158,12 +208,11 @@ vector<uint64_t*> Operator::getResults()
 }
 //---------------------------------------------------------------------------
 unsigned Operator::getResultsSize() {
-    /*
-    unsigned size = 0;
-    for (auto& c : tmpResults) {
-        size += c.size()*8;
-    }*/
     return resultSize*tmpResults.size()*8;
+}
+//---------------------------------------------------------------------------
+unsigned Operator::getResultTupleSize() {
+    return tmpResults.size()*8;
 }
 //---------------------------------------------------------------------------
 bool Join::require(SelectInfo info)
@@ -408,30 +457,30 @@ void Join::createAsyncTasks(boost::asio::io_service& ioService) {
     //hashTable.reserve(left->resultSize*2);
    
     uint64_t limit = left->resultSize;
-    const unsigned taskNum = (left->getResultsSize()+(L2_SIZE/2-1))/(L2_SIZE/2); // just roundup
+    const unsigned partitionSize = L2_SIZE/2;
+    //const unsigned taskNum = (left->getResultsSize()+(partitionSize-1))/(partitionSize); // just roundup
+    const unsigned taskNum = CNT_PARTITIONS(left->getResultsSize(), partitionSize);
         // @TODO cachemiis may occur when a tuple is int the middle of partitioning point
 #ifdef VERBOSE
-    cout << "Join("<< queryIndex << "," << operatorIndex <<")::createAsyncTasks left_table_size(" << left->operatorIndex <<  "): "<< limit << " tuples " <<  left->getResultsSize()/1024.0 << "KB -> create #buildingTask: "<< taskNum << endl;
+    cout << "Join("<< queryIndex << "," << operatorIndex <<")::createAsyncTasks left_table_size(" << left->operatorIndex <<  "): "<< limit << " tuples " <<  left->getResultsSize()/1024.0 << "KB" << endl << "-> create #buildingTask: "<< taskNum << " partitionSize: " << partitionSize/left->getResultTupleSize() << " tuples(size:" << left->getResultTupleSize() << ")" << endl;
 #endif
 
     pendingBuildingHashtable = taskNum;
    // __sync_synchronize(); // need it?
     uint64_t* leftKeyColumn=leftInputData[leftColId];
     uint64_t* rightKeyColumn=rightInputData[rightColId];
-    unsigned sum = 0;
-    for (int i=0; i <right->resultSize; i++) 
-        sum += rightKeyColumn[i];
     vector<uint64_t*> lrKeys;
     lrKeys.push_back(leftKeyColumn);
     lrKeys.push_back(rightKeyColumn);
     if (taskNum == 0) {
         finishAsyncRun(ioService, true);
     }
+    // int length = limit/(taskNum);
+    int length = partitionSize/left->getResultTupleSize();
     for (unsigned i=0; i<taskNum; i++) {
-        int length = limit/(taskNum);
         int start = i*length;
         if (i == taskNum-1) {
-            length = length+(limit%length);
+            length = limit%length;
         }
         ioService.post(bind(&Join::buildingTask, this, &ioService, lrKeys, start, length));
     }
@@ -453,18 +502,21 @@ void Join::buildingTask(boost::asio::io_service* ioService, vector<uint64_t*> lr
     int remainder = __sync_sub_and_fetch(&pendingBuildingHashtable, 1);
     if (remainder == 0) { 
         unsigned limit = right->resultSize;
-        const unsigned taskNum = ((right->getResultsSize())+(L2_SIZE/2-1))/(L2_SIZE/2); 
+        const unsigned partitionSize = L2_SIZE/2;
+        const unsigned taskNum = CNT_PARTITIONS(right->getResultsSize(), partitionSize);
+        //const unsigned taskNum = ((right->getResultsSize())+(L2_SIZE/2-1))/(L2_SIZE/2); 
         // @TODO cachemiis may occur when a tuple is int the middle of partitioning point
         pendingProbingHashtable = taskNum;
 #ifdef VERBOSE
-    cout << "Join("<< queryIndex << "," << operatorIndex <<")::createAsyncTasks right_table_size(" << right->operatorIndex <<  "): "<< limit << " tuples " <<  right->getResultsSize()/1024.0 << "KB -> create #probingTask: "<< taskNum << endl;
+    cout << "Join("<< queryIndex << "," << operatorIndex <<")::createAsyncTasks right_table_size(" << right->operatorIndex <<  "): "<< limit << " tuples " <<  right->getResultsSize()/1024.0 << "KB" << endl << "-> create #probingTask: "<< taskNum << " partitionSize: " << (partitionSize/right->getResultTupleSize()) << " tuples(size:" << right->getResultTupleSize() << ")" << endl;
 #endif
         __sync_synchronize(); // for hash table
+        //int length_p = limit/(taskNum);
+        int length_p = partitionSize/right->getResultTupleSize();
         for (unsigned i=0; i<taskNum; i++) {
-            int length_p = limit/(taskNum);
             int start_p = i*length_p;
             if (i == taskNum-1) { //  
-                length_p = length_p+(limit%length_p);
+                length_p = limit%length_p;
             }
             ioService->post(bind(&Join::probingTask, this, ioService, lrKeys, start_p, length_p));
         }

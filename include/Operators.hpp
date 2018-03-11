@@ -67,6 +67,8 @@ public:
     virtual std::vector<uint64_t*> getResults();
     /// Get materialized results size in bytes
     virtual unsigned getResultsSize();
+    // Get one tuple size of the materialized result in bytes
+    virtual unsigned getResultTupleSize();
     /// The result size
     uint64_t resultSize=0;
     ///he destructor
@@ -92,6 +94,7 @@ public:
     /// Get  materialized results
     virtual std::vector<uint64_t*> getResults() override;
     virtual unsigned getResultsSize() override;
+    virtual unsigned getResultTupleSize() override;
 };
 //---------------------------------------------------------------------------
 class FilterScan : public Scan {
@@ -104,6 +107,8 @@ class FilterScan : public Scan {
     /// Copy tuple to result
     void copy2Result(uint64_t id);
 
+    /// for parallel
+    int pendingTask = -1;
 public:
     /// The constructor
     FilterScan(Relation& r,std::vector<FilterInfo> filters) : Scan(r,filters[0].filterColumn.binding), filters(filters)  {};
@@ -117,9 +122,12 @@ public:
     virtual void asyncRun(boost::asio::io_service& ioService) override;
     /// only call it if pendingAsyncOperator=0, and can getResults()
     virtual void createAsyncTasks(boost::asio::io_service& ioService) override;
+    /// create sync test
+    void filterTask(boost::asio::io_service* ioService, unsigned start, unsigned length);
     /// Get  materialized results
     virtual std::vector<uint64_t*> getResults() override { return Operator::getResults(); }
     virtual unsigned getResultsSize() override { return Operator::getResultsSize(); }
+    virtual unsigned getResultTupleSize() override { return Operator::getResultTupleSize(); }
     /// The result size
 };
 //---------------------------------------------------------------------------

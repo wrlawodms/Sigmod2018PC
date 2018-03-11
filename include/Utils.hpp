@@ -2,6 +2,9 @@
 #include <fstream>
 #include "Relation.hpp"
 
+// Utils macro, maybe faster than static method?
+#define CNT_PARTITIONS(WHOLE,PART) (((WHOLE)+((PART)-1))/(PART))
+
 //---------------------------------------------------------------------------
 class Utils {
 public:
