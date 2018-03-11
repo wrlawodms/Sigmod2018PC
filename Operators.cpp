@@ -381,7 +381,6 @@ void Join::asyncRun(boost::asio::io_service& ioService) {
 //---------------------------------------------------------------------------
 void Join::createAsyncTasks(boost::asio::io_service& ioService) {
     assert (pendingAsyncOperator==0);
-    // can be parallize
 
     if (left->resultSize>right->resultSize) {
         swap(left,right);
@@ -405,7 +404,6 @@ void Join::createAsyncTasks(boost::asio::io_service& ioService) {
 
     auto leftColId=left->resolve(pInfo.left);
     auto rightColId=right->resolve(pInfo.right);
-
     // Build phase
     //hashTable.reserve(left->resultSize*2);
    
@@ -413,13 +411,16 @@ void Join::createAsyncTasks(boost::asio::io_service& ioService) {
     const unsigned taskNum = (left->getResultsSize()+(L2_SIZE/2-1))/(L2_SIZE/2); // just roundup
         // @TODO cachemiis may occur when a tuple is int the middle of partitioning point
 #ifdef VERBOSE
-    cout << "Join("<< queryIndex << "," << operatorIndex <<")::createAsyncTasks left_table_size(" << left->operatorIndex <<  "): "<< limit << " tuples "<< requestedColumnsLeft.size() << " columns " <<  left->getResultsSize()/1024.0 << "KB -> create #buildingTask: "<< taskNum << endl;
+    cout << "Join("<< queryIndex << "," << operatorIndex <<")::createAsyncTasks left_table_size(" << left->operatorIndex <<  "): "<< limit << " tuples " <<  left->getResultsSize()/1024.0 << "KB -> create #buildingTask: "<< taskNum << endl;
 #endif
-    
+
     pendingBuildingHashtable = taskNum;
    // __sync_synchronize(); // need it?
     uint64_t* leftKeyColumn=leftInputData[leftColId];
     uint64_t* rightKeyColumn=rightInputData[rightColId];
+    unsigned sum = 0;
+    for (int i=0; i <right->resultSize; i++) 
+        sum += rightKeyColumn[i];
     vector<uint64_t*> lrKeys;
     lrKeys.push_back(leftKeyColumn);
     lrKeys.push_back(rightKeyColumn);
@@ -429,16 +430,18 @@ void Join::createAsyncTasks(boost::asio::io_service& ioService) {
     for (unsigned i=0; i<taskNum; i++) {
         int length = limit/(taskNum);
         int start = i*length;
-        if (length == 0) {
-            length = limit%(length);
+        if (i == taskNum-1) {
+            length = length+(limit%length);
         }
         ioService.post(bind(&Join::buildingTask, this, &ioService, lrKeys, start, length));
     }
-    
-    //ioService.post([&]() {
-        //run(); // call parallized task 
-       // finishAsyncRun(ioService, true);
-    //});  
+  
+  /*  
+    ioService.post([&]() {
+        run(); // call parallized task 
+        finishAsyncRun(ioService, true);
+    }); 
+    */ 
 }
 
 //---------------------------------------------------------------------------
@@ -454,13 +457,14 @@ void Join::buildingTask(boost::asio::io_service* ioService, vector<uint64_t*> lr
         // @TODO cachemiis may occur when a tuple is int the middle of partitioning point
         pendingProbingHashtable = taskNum;
 #ifdef VERBOSE
-    cout << "Join("<< queryIndex << "," << operatorIndex <<")::createAsyncTasks right_table_size(" << right->operatorIndex <<  "): "<< limit << " tuples "<< requestedColumnsRight.size() << " columns " <<  right->getResultsSize()/1024.0 << "KB -> create #probingTask: "<< taskNum << endl;
+    cout << "Join("<< queryIndex << "," << operatorIndex <<")::createAsyncTasks right_table_size(" << right->operatorIndex <<  "): "<< limit << " tuples " <<  right->getResultsSize()/1024.0 << "KB -> create #probingTask: "<< taskNum << endl;
 #endif
+        __sync_synchronize(); // for hash table
         for (unsigned i=0; i<taskNum; i++) {
             int length_p = limit/(taskNum);
             int start_p = i*length_p;
-            if (length_p == 0) { //  
-                length_p = limit%(length_p);
+            if (i == taskNum-1) { //  
+                length_p = length_p+(limit%length_p);
             }
             ioService->post(bind(&Join::probingTask, this, ioService, lrKeys, start_p, length_p));
         }
@@ -470,10 +474,12 @@ void Join::buildingTask(boost::asio::io_service* ioService, vector<uint64_t*> lr
 }
 void Join::probingTask(boost::asio::io_service* ioService, vector<uint64_t*> lrKeys, unsigned start, unsigned length) { 
     vector<vector<uint64_t>> localResults;
+    unsigned rightKeyChecksum = 0;
     for (unsigned i=0; i<requestedColumns.size(); i++)
         localResults.emplace_back();
     for (uint64_t i=start,limit=start+length;i!=limit;++i) {        
         auto rightKey=lrKeys[1][i];
+        rightKeyChecksum += rightKey;
         auto range=hashTable.equal_range(rightKey);
         for (auto iter=range.first;iter!=range.second;++iter) {
             unsigned relColId=0; 
@@ -484,7 +490,7 @@ void Join::probingTask(boost::asio::io_service* ioService, vector<uint64_t*> lrK
                 localResults[relColId++].push_back(copyRightData[cId][i]);
         }
     } 
-    localMt.lock();
+    localMt.lock(); 
     for (unsigned i=0; i<requestedColumns.size(); i++)  {
         tmpResults[i].insert(tmpResults[i].end(), localResults[i].begin(), localResults[i].end());
     }
@@ -494,7 +500,7 @@ void Join::probingTask(boost::asio::io_service* ioService, vector<uint64_t*> lrK
     int remainder = __sync_sub_and_fetch(&pendingProbingHashtable, 1);
     if (remainder == 0) {
 #ifdef VERBOSE
-    cout << "Join("<< queryIndex << "," << operatorIndex <<")::asyncRun end result_table: " << resultSize << " tuples"<< endl;
+    cout << "Join("<< queryIndex << "," << operatorIndex <<")::asyncRun end result_table: " << resultSize << " tuples "<< "used_hash_size: " << hashTable.size() << endl;
 #endif
         finishAsyncRun(*ioService, true);
     }
