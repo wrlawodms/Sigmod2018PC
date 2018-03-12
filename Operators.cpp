@@ -50,6 +50,10 @@ unsigned Scan::getResultTupleSize() {
     return resultColumns.size()*8; 
 }
 //---------------------------------------------------------------------------
+unsigned Scan::getResultColCnt() {
+    return resultColumns.size();
+}
+//---------------------------------------------------------------------------
 void Scan::run()
 // Run
 {
@@ -215,6 +219,10 @@ unsigned Operator::getResultTupleSize() {
     return tmpResults.size()*8;
 }
 //---------------------------------------------------------------------------
+unsigned Operator::getResultColCnt() {
+    return tmpResults.size();
+}
+//---------------------------------------------------------------------------
 bool Join::require(SelectInfo info)
 // Require a column and add it to results
 {
@@ -239,7 +247,9 @@ bool Join::require(SelectInfo info)
 void Join::copy2Result(uint64_t leftId,uint64_t rightId)
 // Copy to result
 {
+    throw;
     //if array, cache util is better, becaouse now, each columns in tmpResults are seperated
+    /*
     unsigned relColId=0;
     for (unsigned cId=0;cId<copyLeftData.size();++cId)
         tmpResults[relColId++].push_back(copyLeftData[cId][leftId]);
@@ -247,13 +257,14 @@ void Join::copy2Result(uint64_t leftId,uint64_t rightId)
     for (unsigned cId=0;cId<copyRightData.size();++cId)
         tmpResults[relColId++].push_back(copyRightData[cId][rightId]);
     ++resultSize;
+    */
 }
 //---------------------------------------------------------------------------
-/*
+
 void Join::run()
   // Run
 {
-    */
+    throw;
     /*
   if (runInput) {
      left->require(pInfo.left);
@@ -301,18 +312,19 @@ void Join::run()
       copy2Result(iter->second,i);
     }
   }
-}*/
+*/
+}
 
-void Join::run()
+//void Join::run()
 // Run
-{
+//{
     /*
     left->require(pInfo.left);
     right->require(pInfo.right);
     left->run();
     right->run();
 */
-
+/*
     // Use smaller input for build
     if (left->resultSize>right->resultSize) {
         swap(left,right);
@@ -413,7 +425,7 @@ void Join::run()
     }
     
 }
-
+*/
 //---------------------------------------------------------------------------
 void Join::asyncRun(boost::asio::io_service& ioService) {
 #ifdef VERBOSE
@@ -438,63 +450,221 @@ void Join::createAsyncTasks(boost::asio::io_service& ioService) {
     }
 
     auto leftInputData=left->getResults();
-    auto rightInputData=right->getResults();
+    auto rightInputData=right->getResults(); 
 
-    // Resolve the input columns
-    unsigned resColId=0;
+    if (left->resultSize == 0)
+        finishAsyncRun(ioService, true);
+
+    unsigned resColId = 0;
     for (auto& info : requestedColumnsLeft) {
-        copyLeftData.push_back(leftInputData[left->resolve(info)]);
         select2ResultColId[info]=resColId++;
     }
     for (auto& info : requestedColumnsRight) {
-        copyRightData.push_back(rightInputData[right->resolve(info)]);
         select2ResultColId[info]=resColId++;
     }
 
-    auto leftColId=left->resolve(pInfo.left);
-    auto rightColId=right->resolve(pInfo.right);
-    // Build phase
-    //hashTable.reserve(left->resultSize*2);
-   
-    uint64_t limit = left->resultSize;
-    const unsigned partitionSize = L2_SIZE/2;
-    //const unsigned taskNum = (left->getResultsSize()+(partitionSize-1))/(partitionSize); // just roundup
-    const unsigned taskNum = CNT_PARTITIONS(left->getResultsSize(), partitionSize);
+    leftColId=left->resolve(pInfo.left);
+    rightColId=right->resolve(pInfo.right);
+
+    pendingPartitioning = 2;
+
+    cntPartition = CNT_PARTITIONS(right->getResultsSize(), partitionSize); 
+    if (cntPartition == 1) {
+        pendingSubjoin = 1;
+        __sync_synchronize();
+        ioService.post(bind(&Join::subJoinTask, this, &ioService, leftInputData, left->resultSize, rightInputData, right->resultSize));
+        return;
+    }
+
+    cntPartition = 1<<(Utils::log2(cntPartition-1)+1); // round up, power of 2 for hashing
+    // must use jemalloc
+    partitionTable[0] = (uint64_t*)malloc(left->getResultsSize());
+    partitionTable[1] = (uint64_t*)malloc(right->getResultsSize());
+    
+    
+    for (unsigned i=0; i<cntPartition; i++) {
+        partition[0].emplace_back();
+        partition[1].emplace_back();
+        for (unsigned j=0; j<left->getResultColCnt(); j++) {
+            partition[0][i].emplace_back();
+        }
+        for (unsigned j=0; j<right->getResultColCnt(); j++) {
+            partition[1][i].emplace_back();
+        }
+    }
+    
         // @TODO cachemiis may occur when a tuple is int the middle of partitioning point
+/*
 #ifdef VERBOSE
     cout << "Join("<< queryIndex << "," << operatorIndex <<")::createAsyncTasks left_table_size(" << left->operatorIndex <<  "): "<< limit << " tuples " <<  left->getResultsSize()/1024.0 << "KB" << endl << "-> create #buildingTask: "<< taskNum << " partitionSize: " << partitionSize/left->getResultTupleSize() << " tuples(size:" << left->getResultTupleSize() << ")" << endl;
 #endif
-
-    pendingBuildingHashtable = taskNum;
-   // __sync_synchronize(); // need it?
-    uint64_t* leftKeyColumn=leftInputData[leftColId];
-    uint64_t* rightKeyColumn=rightInputData[rightColId];
-    vector<uint64_t*> lrKeys;
-    lrKeys.push_back(leftKeyColumn);
-    lrKeys.push_back(rightKeyColumn);
-    if (taskNum == 0) {
-        finishAsyncRun(ioService, true);
-    }
-    // int length = limit/(taskNum);
-    int length = partitionSize/left->getResultTupleSize();
-    for (unsigned i=0; i<taskNum; i++) {
-        int start = i*length;
-        if (i == taskNum-1) {
-            length = limit%length;
+*/
+    int cntTask = THREAD_NUM;
+    for (int i=0; i<cntTask; i++) {
+        histograms[0].emplace_back();
+        histograms[1].emplace_back();
+        for (unsigned j=0; j<cntPartition; j++) {
+            histograms[0][i].emplace_back();
+            histograms[1][i].emplace_back();
         }
-        ioService.post(bind(&Join::buildingTask, this, &ioService, lrKeys, start, length));
     }
-  
-  /*  
-    ioService.post([&]() {
-        run(); // call parallized task 
-        finishAsyncRun(ioService, true);
-    }); 
-    */ 
+    pendingMakingHistogram[0] = pendingMakingHistogram[1] = cntTask;
+
+    __sync_synchronize();    
+    // int length = limit/(taskNum);
+    int lengthLeft = left->resultSize/cntTask;
+    int lengthRight = right->resultSize/cntTask;
+    for (int i=0; i<cntTask; i++) {
+        int startLeft = i*lengthLeft;
+        int startRight = i*lengthRight;
+        if (i == cntTask-1) {
+            lengthLeft = lengthLeft + left->resultSize%lengthLeft;
+            lengthRight = lengthRight + right->resultSize%lengthRight;
+        }
+        ioService.post(bind(&Join::histogramTask, this, &ioService, cntTask, i, 0, startLeft, lengthLeft)); // for left
+        ioService.post(bind(&Join::histogramTask, this, &ioService, cntTask, i, 1, startRight, lengthRight)); // for right
+    }
 }
 
 //---------------------------------------------------------------------------
-// lrKeys : 0 : left, 1: right 
+void Join::histogramTask(boost::asio::io_service* ioService, int cntTask, int taskIndex, int leftOrRight, unsigned start, unsigned length) {
+    uint64_t* keyColumn;
+    vector<uint64_t*> inputData = left->getResults();
+    if (!leftOrRight) { //right
+        inputData = left->getResults();
+        keyColumn = inputData[leftColId];
+    } else {
+        inputData = right->getResults();
+        keyColumn = inputData[rightColId];
+    }
+
+    for (unsigned i=start,limit=start+length; i<limit; i++) {
+      histograms[leftOrRight][taskIndex][RADIX_HASH(keyColumn[i], cntPartition)]++; // cntPartition으로 나뉠 수 있도록하는 HASH
+    }
+    int remainder = __sync_sub_and_fetch(&pendingMakingHistogram[leftOrRight], 1);
+    if (remainder == 0) { // gogo scattering
+        for (int i=1; i<cntTask; i++) {
+            for (unsigned j=0; j<cntPartition; j++) {
+                histograms[leftOrRight][i][j] += histograms[leftOrRight][i-1][j];
+                // 기존에 histograms[LR][i][j]에는 Task i가 Partition j에 넣을 tuple 수를 count해 놓고 있다
+                // 이 연산 후 histograms[LR][i][j]는Task i+1이 Partition j에 값을 복사할 위치
+            }
+        }
+        auto cntColumns = requestedColumns.size();
+        unsigned prePartCnt = 0;
+        uint64_t* partAddress = partitionTable[leftOrRight];
+        partition[leftOrRight][0][0] = partitionTable[leftOrRight];
+        for (unsigned i=0; i<cntPartition;i ++) {
+            unsigned curPartCnt = histograms[leftOrRight][cntTask-1][i];
+            unsigned cntTuples = curPartCnt-prePartCnt;
+            partitionLength[leftOrRight].push_back(cntTuples);
+            if (i != 0)
+                partAddress += cntTuples*cntColumns;
+            for (unsigned j=0; j<cntColumns; j++) {
+                partition[leftOrRight][i][j] = partAddress + j*cntTuples;
+            }
+            prePartCnt = curPartCnt;
+        }
+        pendingScattering[leftOrRight] = cntTask;
+        __sync_synchronize(); //for histograms
+        for (int i=0; i<cntTask; i++) {
+            ioService->post(bind(&Join::scatteringTask, this, ioService, cntTask, i, leftOrRight, start, length)); // for left
+        }
+    }
+}
+//---------------------------------------------------------------------------
+void Join::scatteringTask(boost::asio::io_service* ioService, int cntTask, int taskIndex, int leftOrRight, unsigned start, unsigned length) {
+    uint64_t* keyColumn;
+    vector<uint64_t*> inputData;
+    if (!leftOrRight) { 
+        inputData = left->getResults();
+        keyColumn = inputData[leftColId];
+    } else {
+        inputData = right->getResults();
+        keyColumn = inputData[rightColId];
+    }
+    // copy histogram for cache
+    for (unsigned j=0; j<inputData.size(); j++) {  // sequential한 컬럼단위로 복사
+        vector<unsigned> copyHist = histograms[leftOrRight][taskIndex];
+        for (unsigned i=start, limit=start+length; i<limit; i++) {
+            unsigned hashResult = RADIX_HASH(keyColumn[i], cntPartition);
+            // unsigned& tupleIdx = histograms[leftOrRight][taskIndex][hashResult];
+            // << it may cause hard invalication storm
+            partition[leftOrRight][hashResult][j][copyHist[hashResult]] = inputData[j][i];
+            copyHist[hashResult]++;
+            // tupleIdx++; 
+        }
+    }
+    int remainder = __sync_sub_and_fetch(&pendingScattering[leftOrRight], 1);
+    if (remainder == 0) { // gogo scattering
+        int remPart = __sync_sub_and_fetch(&pendingPartitioning, 1);
+        if (remPart == 0) {
+            pendingSubjoin = cntPartition;
+            __sync_synchronize();
+            int taskNum = cntPartition;
+            for (int i=0; i<taskNum; i++) {
+                ioService->post(bind(&Join::subJoinTask, this, ioService, partition[0][i], partitionLength[0][i], partition[1][i], partitionLength[1][i]));
+            }
+        }
+    }
+}
+
+void Join::subJoinTask(boost::asio::io_service* ioService, vector<uint64_t*> localLeft, unsigned limitLeft, vector<uint64_t*> localRight, unsigned limitRight) {
+    unordered_multimap<uint64_t, uint64_t> hashTable;
+    // Resolve the partitioned columns
+    std::vector<uint64_t*> copyLeftData,copyRightData;
+    uint64_t* leftKeyColumn = localLeft[leftColId];
+    uint64_t* rightKeyColumn = localRight[rightColId];
+    for (auto& info : requestedColumnsLeft) {
+        copyLeftData.push_back(localLeft[left->resolve(info)]);
+    }
+    for (auto& info : requestedColumnsRight) {
+        copyRightData.push_back(localRight[right->resolve(info)]);
+    }
+
+    // building
+    hashTable.reserve(limitLeft*2);
+    for (uint64_t i=0; i<limitLeft; i++) {
+        hashTable.emplace(make_pair(leftKeyColumn[i],i));
+    }
+    // probing
+    vector<vector<uint64_t>> localResults;
+    for (unsigned i=0; i<requestedColumns.size(); i++) {
+        localResults.emplace_back();
+    }
+    for (uint64_t i=0; i<limitRight; i++) {
+        auto rightKey=rightKeyColumn[i];
+        auto range=hashTable.equal_range(rightKey);
+        for (auto iter=range.first;iter!=range.second;++iter) {
+            //copy2Result(iter->second,i);
+            unsigned relColId=0;
+            for (unsigned cId=0;cId<copyLeftData.size();++cId)
+                localResults[relColId++].push_back(copyLeftData[cId][iter->second]);
+
+            for (unsigned cId=0;cId<copyRightData.size();++cId)
+                localResults[relColId++].push_back(copyRightData[cId][i]);
+        }
+    }
+    localMt.lock();
+    for (unsigned i=0; i<requestedColumns.size(); i++)  {
+        tmpResults[i].insert(tmpResults[i].end(), localResults[i].begin(), localResults[i].end());
+    }
+    resultSize += localResults[0].size();
+    localMt.unlock();
+    
+    int remainder = __sync_sub_and_fetch(&pendingSubjoin, 1);
+    if (remainder == 0) {
+        free(partitionTable[0]);
+        free(partitionTable[1]);
+        finishAsyncRun(*ioService, true); 
+    }
+    //일단은 그냥 left로 building하자. 나중에 최적화된 방법으로 ㄲ
+    
+}
+
+//---------------------------------------------------------------------------
+// lrKeys : 0 : left, 1: right
+/* 
 void Join::buildingTask(boost::asio::io_service* ioService, vector<uint64_t*> lrKeys, unsigned start, unsigned length) {
     for (uint64_t i=start,limit=start+length;i!=limit;++i) {        
         hashTable.insert(make_pair(lrKeys[0][i],i));
@@ -557,7 +727,7 @@ void Join::probingTask(boost::asio::io_service* ioService, vector<uint64_t*> lrK
         finishAsyncRun(*ioService, true);
     }
 }
-
+*/
 //---------------------------------------------------------------------------
 void SelfJoin::copy2Result(uint64_t id)
 // Copy to result

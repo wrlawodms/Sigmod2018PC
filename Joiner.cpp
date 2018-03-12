@@ -104,7 +104,7 @@ string Joiner::join(QueryInfo& query, bool async)
     auto& firstJoin=query.predicates[0];
     auto left=addScan(usedRelations,firstJoin.left,query);
     auto right=addScan(usedRelations,firstJoin.right,query);
-    shared_ptr<Operator> root=make_shared<Join>(left, right,firstJoin);
+    shared_ptr<Operator> root=make_shared<Join>(left, right, firstJoin);
 #ifdef VERBOSE
     unsigned opIdx = 0;
     left->setOperatorIndex(opIdx++);

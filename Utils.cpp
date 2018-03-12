@@ -34,3 +34,12 @@ void Utils::storeRelation(ofstream& out,Relation& r,unsigned i)
     out << baseName << "\n";
 }
 //---------------------------------------------------------------------------
+int Utils::log2(unsigned v) { 
+    int n=-1;
+    while (v != 0) {
+        v>>=1;
+        n++;
+    }
+    return n;
+}
+//---------------------------------------------------------------------------

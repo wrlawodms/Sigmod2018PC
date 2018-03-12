@@ -14,6 +14,7 @@
 #include "tbb/concurrent_unordered_map.h"
 #include "Relation.hpp"
 #include "Parser.hpp"
+#include "Config.hpp"
 //#include "Joiner.hpp"
 
 class Joiner;
@@ -69,6 +70,7 @@ public:
     virtual unsigned getResultsSize();
     // Get one tuple size of the materialized result in bytes
     virtual unsigned getResultTupleSize();
+    virtual unsigned getResultColCnt();
     /// The result size
     uint64_t resultSize=0;
     ///he destructor
@@ -95,6 +97,7 @@ public:
     virtual std::vector<uint64_t*> getResults() override;
     virtual unsigned getResultsSize() override;
     virtual unsigned getResultTupleSize() override;
+    virtual unsigned getResultColCnt() override;
 };
 //---------------------------------------------------------------------------
 class FilterScan : public Scan {
@@ -128,6 +131,7 @@ public:
     virtual std::vector<uint64_t*> getResults() override { return Operator::getResults(); }
     virtual unsigned getResultsSize() override { return Operator::getResultsSize(); }
     virtual unsigned getResultTupleSize() override { return Operator::getResultTupleSize(); }
+    virtual unsigned getResultColCnt() override { return Operator::getResultColCnt(); }
     /// The result size
 };
 //---------------------------------------------------------------------------
@@ -141,17 +145,29 @@ class Join : public Operator {
     /// Create mapping for bindings
     void createMappingForBindings();
 
-    //using HT=std::unordered_multimap<uint64_t,uint64_t>;
-    using HT=tbb::concurrent_unordered_multimap<uint64_t,uint64_t>;
+    using HT=std::unordered_multimap<uint64_t,uint64_t>;
+    //using HT=tbb::concurrent_unordered_multimap<uint64_t,uint64_t>;
 
-    int pendingBuildingHashtable = -1;
-    int pendingProbingHashtable = -1;
-    
-    void buildingTask(boost::asio::io_service* ioService, std::vector<uint64_t*> lrKeys, unsigned start, unsigned length);
-    void probingTask(boost::asio::io_service* ioService, std::vector<uint64_t*> lrKeys, unsigned start, unsigned length);
+    int pendingMakingHistogram[2] = {-1,1};
+    int pendingScattering[2] = {-1,1};
+    int pendingPartitioning = -1;
+    int pendingSubjoin = -1;
+
+    // sequentially aloocated address for partitions, will be freed after materializing the result
+    uint64_t* partitionTable[2];
+    std::vector<std::vector<uint64_t*>> partition[2]; // just pointing partitionTable[], it is built after histogram, 각 파티션별 컬럼들의 위치를 포인팅  [LR][partition][column][tuple] P|C1sC2sC3s|P|C1sC2sC3s|...
+    const unsigned partitionSize = L2_SIZE/2;
+    unsigned cntPartition;
+    std::vector<std::vector<unsigned>> histograms[2]; // [LR][taskIndex][partitionIndex]
+    std::vector<unsigned> partitionLength[2]; // #tuples per each partition
+
+    void histogramTask(boost::asio::io_service* ioService, int cntTask, int taskIndex, int leftOrRight, unsigned start, unsigned length);
+    void scatteringTask(boost::asio::io_service* ioService, int cntTask, int taskIndex, int leftOrRight, unsigned start, unsigned length); 
+    // for cache, partition must be allocated sequentially 
+    void subJoinTask(boost::asio::io_service* ioService, std::vector<uint64_t*> left, unsigned leftLimit, std::vector<uint64_t*> right, unsigned rightLimit);  
     
     /// The hash table for the join
-    HT hashTable;
+    HT hashTable; // is not used in async version
     /// Columns that have to be materialized
     std::unordered_set<SelectInfo> requestedColumns;
     /// Left/right columns that have been requested
@@ -161,7 +177,9 @@ class Join : public Operator {
     /// The entire input data of left and right
     std::vector<uint64_t*> leftInputData,rightInputData;
     /// The input data that has to be copied
-    std::vector<uint64_t*> copyLeftData,copyRightData;
+    //std::vector<uint64_t*> copyLeftData,copyRightData;
+    /// key colums
+    unsigned leftColId, rightColId;
 
 public:
     /// The constructor
