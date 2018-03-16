@@ -70,7 +70,6 @@ public:
     virtual unsigned getResultsSize();
     // Get one tuple size of the materialized result in bytes
     virtual unsigned getResultTupleSize();
-    virtual unsigned getResultColCnt();
     /// The result size
     uint64_t resultSize=0;
     ///he destructor
@@ -97,7 +96,6 @@ public:
     virtual std::vector<uint64_t*> getResults() override;
     virtual unsigned getResultsSize() override;
     virtual unsigned getResultTupleSize() override;
-    virtual unsigned getResultColCnt() override;
 };
 //---------------------------------------------------------------------------
 class FilterScan : public Scan {
@@ -131,7 +129,6 @@ public:
     virtual std::vector<uint64_t*> getResults() override { return Operator::getResults(); }
     virtual unsigned getResultsSize() override { return Operator::getResultsSize(); }
     virtual unsigned getResultTupleSize() override { return Operator::getResultTupleSize(); }
-    virtual unsigned getResultColCnt() override { return Operator::getResultColCnt(); }
     /// The result size
 };
 //---------------------------------------------------------------------------
@@ -148,21 +145,25 @@ class Join : public Operator {
     using HT=std::unordered_multimap<uint64_t,uint64_t>;
     //using HT=tbb::concurrent_unordered_multimap<uint64_t,uint64_t>;
 
-    int pendingMakingHistogram[2] = {-1,1};
-    int pendingScattering[2] = {-1,1};
+    int pendingMakingHistogram[2] = {-1,-1};
+    int pendingScattering[2] = {-1,-1};
     int pendingPartitioning = -1;
     int pendingSubjoin = -1;
 
     // sequentially aloocated address for partitions, will be freed after materializing the result
     uint64_t* partitionTable[2];
-    std::vector<std::vector<uint64_t*>> partition[2]; // just pointing partitionTable[], it is built after histogram, 각 파티션별 컬럼들의 위치를 포인팅  [LR][partition][column][tuple] P|C1sC2sC3s|P|C1sC2sC3s|...
     const unsigned partitionSize = L2_SIZE/2;
     unsigned cntPartition;
-    std::vector<std::vector<unsigned>> histograms[2]; // [LR][taskIndex][partitionIndex]
+
+    unsigned taskLength[2];
+    const unsigned minTuplesPerTask = 100; // mnimum tuples per histogram/scaaterTask.. 흠 튜플수가 아니라 사이즈로 하는게 낫나
+
+    std::vector<std::vector<uint64_t*>> partition[2]; // just pointing partitionTable[], it is built after histogram, 각 파티션별 컬럼들의 위치를 포인팅  [LR][partition][column][tuple] P|C1sC2sC3s|P|C1sC2sC3s|...
+    std::vector<std::vector<unsigned>> histograms[2]; // [LR][taskIndex][partitionIndex], 각 파티션에 대한 벡터는 heap에 allocate되나? 안그럼 invalidate storㅇ이 일어날거 같은데
     std::vector<unsigned> partitionLength[2]; // #tuples per each partition
 
     void histogramTask(boost::asio::io_service* ioService, int cntTask, int taskIndex, int leftOrRight, unsigned start, unsigned length);
-    void scatteringTask(boost::asio::io_service* ioService, int cntTask, int taskIndex, int leftOrRight, unsigned start, unsigned length); 
+    void scatteringTask(boost::asio::io_service* ioService, int taskIndex, int leftOrRight, unsigned start, unsigned length); 
     // for cache, partition must be allocated sequentially 
     void subJoinTask(boost::asio::io_service* ioService, std::vector<uint64_t*> left, unsigned leftLimit, std::vector<uint64_t*> right, unsigned rightLimit);  
     

@@ -6,7 +6,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 # set(CMAKE_C_COMPILER /usr/local/bin/gcc)
 # set(CMAKE_CXX_COMPILER /usr/local/bin/g++)
-set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -g") # -fsanitize=address -Wall -fuse-ld=gold")
+set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -g -O3") # -fsanitize=address -Wall -fuse-ld=gold")
 
 set(CMAKE_CXX_FLAGS_RELEASE "-O3")
 
@@ -27,7 +27,7 @@ endif()
 #link_directories(${CMAKE_SOURCE_DIR}/lib)
 
 add_executable(Driver main.cpp)
-target_link_libraries(Driver database boost_system boost_thread tbb pthread)
+target_link_libraries(Driver database boost_system boost_thread tbb pthread m stdc++ dl jemalloc)
 
 # Interactive command line tool to translate our query format to SQL queries
 add_executable(Query2SQL Query2SQL.cpp)
@@ -40,4 +40,4 @@ ADD_CUSTOM_TARGET(link_target ALL
   COMMAND ${CMAKE_COMMAND} -E create_symlink ${CMAKE_CURRENT_SOURCE_DIR}/workloads
   ${CMAKE_CURRENT_BINARY_DIR}/workloads)
 
-#add_definitions(-DVERBOSE)
+add_definitions(-DVERBOSE)

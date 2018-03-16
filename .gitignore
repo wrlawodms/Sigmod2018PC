@@ -2,4 +2,9 @@ cscope.*
 build
 
 .*.swp
+workloads
 submission.tar.gz 
+
+
+cachegrind.*
+perf.*
