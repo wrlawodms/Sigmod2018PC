@@ -24,7 +24,7 @@ if (CMAKE_BUILD_TYPE MATCHES "[Dd][Ee][Bb][Uu][Gg]" OR FORCE_TESTS)
 #add_subdirectory(test)
 endif()
 
-#link_directories(${CMAKE_SOURCE_DIR}/lib)
+link_directories(${CMAKE_SOURCE_DIR}/lib)
 
 add_executable(Driver main.cpp)
 target_link_libraries(Driver database boost_system boost_thread tbb pthread m stdc++ dl jemalloc)
@@ -40,4 +40,4 @@ ADD_CUSTOM_TARGET(link_target ALL
   COMMAND ${CMAKE_COMMAND} -E create_symlink ${CMAKE_CURRENT_SOURCE_DIR}/workloads
   ${CMAKE_CURRENT_BINARY_DIR}/workloads)
 
-add_definitions(-DVERBOSE)
+#add_definitions(-DVERBOSE)

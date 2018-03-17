@@ -15,6 +15,7 @@
 #include "Relation.hpp"
 #include "Parser.hpp"
 #include "Config.hpp"
+
 //#include "Joiner.hpp"
 
 class Joiner;
@@ -152,11 +153,11 @@ class Join : public Operator {
 
     // sequentially aloocated address for partitions, will be freed after materializing the result
     uint64_t* partitionTable[2];
-    const unsigned partitionSize = L2_SIZE/2;
+    const unsigned partitionSize = L2_SIZE/16;
     unsigned cntPartition;
 
     unsigned taskLength[2];
-    const unsigned minTuplesPerTask = 100; // mnimum tuples per histogram/scaaterTask.. 흠 튜플수가 아니라 사이즈로 하는게 낫나
+    const unsigned minTuplesPerTask = 100; // minimum part table size
 
     std::vector<std::vector<uint64_t*>> partition[2]; // just pointing partitionTable[], it is built after histogram, 각 파티션별 컬럼들의 위치를 포인팅  [LR][partition][column][tuple] P|C1sC2sC3s|P|C1sC2sC3s|...
     std::vector<std::vector<unsigned>> histograms[2]; // [LR][taskIndex][partitionIndex], 각 파티션에 대한 벡터는 heap에 allocate되나? 안그럼 invalidate storㅇ이 일어날거 같은데
