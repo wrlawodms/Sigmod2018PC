@@ -464,7 +464,8 @@ void Join::createAsyncTasks(boost::asio::io_service& ioService) {
     leftColId=left->resolve(pInfo.left);
     rightColId=right->resolve(pInfo.right);
 
-    cntPartition = CNT_PARTITIONS(right->getResultsSize(), partitionSize); 
+   cntPartition = CNT_PARTITIONS(right->getResultsSize(), partitionSize); 
+    // cntPartition = CNT_PARTITIONS(left->getResultsSize(), partitionSize); 
     cntPartition = 1<<(Utils::log2(cntPartition-1)+1); // round up, power of 2 for hashing
 #ifdef VERBOSE
     cout << "Join("<< queryIndex << "," << operatorIndex <<") Right table size: " << right->getResultsSize() << " cnt_tuple: " << right->resultSize << " Left table size: " << left->getResultsSize() << " cnt_tuple: " << left->resultSize << " cntPartition: " << cntPartition << endl;
@@ -729,14 +730,14 @@ void Join::subJoinTask(boost::asio::io_service* ioService, vector<uint64_t*> loc
 sub_join_finish:  
     int remainder = __sync_sub_and_fetch(&pendingSubjoin, 1);
     if (remainder == 0) {
-        if (cntPartition != 1) { // if 1, no partitioning
-            free(partitionTable[0]);
-            free(partitionTable[1]);
-        }
 #ifdef VERBOSE
         cout << "Join("<< queryIndex << "," << operatorIndex <<") join finish. result size: " << resultSize << endl;
 #endif
         finishAsyncRun(*ioService, true); 
+        if (cntPartition != 1) { // if 1, no partitioning
+            free(partitionTable[0]);
+            free(partitionTable[1]);
+        }
     }
     //일단은 그냥 left로 building하자. 나중에 최적화된 방법으로 ㄲ
     
