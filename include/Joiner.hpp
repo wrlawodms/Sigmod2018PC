@@ -50,6 +50,8 @@ class Joiner {
     void waitAsyncJoins();
     /// return parsed asyncResults 
     std::vector<std::string> getAsyncJoinResults();
+	/// print asyncJoin infos
+	void printAsyncJoinInfo();
 
     ~Joiner() {
         ioService.stop();

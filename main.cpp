@@ -1,9 +1,20 @@
 #include <iostream>
+#include <thread>
 #include "Joiner.hpp"
 #include "Parser.hpp"
 #include "Config.hpp"
 
 using namespace std;
+
+#ifdef MONITOR_ASYNC_JOIN
+	void monitorAsyncJoinThread(Joiner* joiner) {
+		while (true) {
+			sleep(1);
+			joiner->printAsyncJoinInfo();
+		}
+	}
+#endif
+
 //---------------------------------------------------------------------------
 int main(int argc, char* argv[]) {
     Joiner joiner(THREAD_NUM);
@@ -16,6 +27,9 @@ int main(int argc, char* argv[]) {
     // Preparation phase (not timed)
     // Build histograms, indexes,...
     //
+#ifdef MONITOR_ASYNC_JOIN
+	thread monitor(monitorAsyncJoinThread, &joiner);
+#endif
     QueryInfo i;
     while (getline(cin, line)) {
         //if (line == "F") continue; // End of a batch

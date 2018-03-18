@@ -18,6 +18,16 @@ void Joiner::addRelation(const char* fileName)
     relations.emplace_back(fileName);
 }
 //---------------------------------------------------------------------------
+void Joiner::printAsyncJoinInfo() {
+	__sync_synchronize();
+	for (int i=0; i<asyncJoins.size(); i++) {	
+		cout << "-----------------Query " << i << "---------------" << endl;
+		if (asyncJoins[i]->pendingAsyncOperator != 0) 
+			asyncJoins[i]->printAsyncInfo();
+	}
+
+}
+//---------------------------------------------------------------------------
 void Joiner::waitAsyncJoins() {
     unique_lock<mutex> lk(cvAsyncMt);
     if (pendingAsyncJoin > 0)  {

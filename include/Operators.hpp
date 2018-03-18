@@ -30,7 +30,7 @@ template<> struct hash<SelectInfo> {
 //---------------------------------------------------------------------------
 class Operator {
 /// Operators materialize their entire result
-
+friend Joiner; // for monitoring
 protected:
     /// parent Operator
     std::weak_ptr<Operator> parent;
@@ -71,6 +71,8 @@ public:
     virtual unsigned getResultsSize();
     // Get one tuple size of the materialized result in bytes
     virtual unsigned getResultTupleSize();
+	// Print async info
+	virtual void printAsyncInfo() = 0;
     /// The result size
     uint64_t resultSize=0;
     ///he destructor
@@ -97,6 +99,8 @@ public:
     virtual std::vector<uint64_t*> getResults() override;
     virtual unsigned getResultsSize() override;
     virtual unsigned getResultTupleSize() override;
+	// Print async info
+	virtual void printAsyncInfo() override;
 };
 //---------------------------------------------------------------------------
 class FilterScan : public Scan {
@@ -130,6 +134,8 @@ public:
     virtual std::vector<uint64_t*> getResults() override { return Operator::getResults(); }
     virtual unsigned getResultsSize() override { return Operator::getResultsSize(); }
     virtual unsigned getResultTupleSize() override { return Operator::getResultTupleSize(); }
+	// Print async info
+	virtual void printAsyncInfo() override;
     /// The result size
 };
 //---------------------------------------------------------------------------
@@ -194,6 +200,8 @@ public:
     virtual void asyncRun(boost::asio::io_service& ioService) override;
     /// only call it if pendingAsyncOperator=0, and can getResults()
     virtual void createAsyncTasks(boost::asio::io_service& ioService) override;
+	// Print async info
+	virtual void printAsyncInfo() override;
 };
 //---------------------------------------------------------------------------
 /*class PartitioningJoin : public Operaotor {
@@ -235,6 +243,8 @@ public:
     virtual void asyncRun(boost::asio::io_service& ioService) override;
     /// only call it if pendingAsyncOperator=0, and can getResults()
     virtual void createAsyncTasks(boost::asio::io_service& ioService) override;
+	// Print async info
+	virtual void printAsyncInfo() override;
 };
 //---------------------------------------------------------------------------
 class Checksum : public Operator {
@@ -261,5 +271,7 @@ public:
     virtual void createAsyncTasks(boost::asio::io_service& ioService) override;
     /// root node register result value to joiner
     virtual void finishAsyncRun(boost::asio::io_service& ioService, bool startParentAsync=false) override;
+	// Print async info
+	virtual void printAsyncInfo() override;
 };
 //---------------------------------------------------------------------------

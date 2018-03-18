@@ -977,12 +977,27 @@ void Checksum::finishAsyncRun(boost::asio::io_service& ioService, bool startPare
         joiner.cvAsync.notify_one();
     }
 }
-/*
 //---------------------------------------------------------------------------
-void PartitioningJoin::require(SelectInfo info) {
+void Checksum::printAsyncInfo() {
+	input->printAsyncInfo();
 }
-//---------------------------------------------------------------------------
-void PartitioningJoin::run() {
+
+void SelfJoin::printAsyncInfo() {
+	input->printAsyncInfo();
 }
-*/
-//---------------------------------------------------------------------------
+void Join::printAsyncInfo() {
+	left->printAsyncInfo();
+	right->printAsyncInfo();
+	__sync_synchronize();
+	cout << "pendingMakingHistogram[0] : " << pendingMakingHistogram[0] << endl;
+	cout << "pendingMakingHistogram[1] : " << pendingMakingHistogram[1] << endl;
+	cout << "pendingScattering[0] : " << pendingScattering[0] << endl;
+	cout << "pendingScattering[1] : " << pendingScattering[1] << endl;
+	cout << "pendingSubjoin : " << pendingSubjoin << endl;
+	
+}
+void FilterScan::printAsyncInfo() {
+	cout << "pendingFilterScan : " << pendingTask << endl;
+}
+void Scan::printAsyncInfo() {
+}
