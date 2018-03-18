@@ -6,9 +6,11 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 # set(CMAKE_C_COMPILER /usr/local/bin/gcc)
 # set(CMAKE_CXX_COMPILER /usr/local/bin/g++)
-set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -g -O3") # -fsanitize=address -Wall -fuse-ld=gold")
+set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -g") # -fsanitize=address -Wall -fuse-ld=gold")
 
-set(CMAKE_CXX_FLAGS_RELEASE "-O3")
+#set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} -O3")
+#set(CMAKE_CXX_FLAGS_RELEASE "-O3")
+
 
 include_directories(include)
 
@@ -21,7 +23,7 @@ target_include_directories(database PUBLIC
 
 OPTION(FORCE_TESTS "Build tests, regardless of build type." ON)
 if (CMAKE_BUILD_TYPE MATCHES "[Dd][Ee][Bb][Uu][Gg]" OR FORCE_TESTS)
-add_subdirectory(test)
+#add_subdirectory(test)
 endif()
 
 #link_directories(${CMAKE_SOURCE_DIR}/lib)
