@@ -103,7 +103,7 @@ static QueryGraphProvides analyzeInputOfJoin(set<unsigned>& usedRelations,Select
     return QueryGraphProvides::None;
 }
 //---------------------------------------------------------------------------
-string Joiner::join(QueryInfo& query, bool async)
+void Joiner::join(QueryInfo& query)
 // Executes a join query
 {
     //cerr << query.dumpText() << endl;
@@ -182,27 +182,12 @@ string Joiner::join(QueryInfo& query, bool async)
         checkSum->setOperatorIndex(opIdx++);
 #endif
     root->setParent(checkSum);
-    if (async) {
-        __sync_fetch_and_add(&pendingAsyncJoin, 1);
-        asyncResults.emplace_back();
+	__sync_fetch_and_add(&pendingAsyncJoin, 1);
+	asyncResults.emplace_back();
 #ifdef VERBOSE
-        cout << "Joiner: Query runs asynchrounously: " << nextQueryIndex << endl; 
+	cout << "Joiner: Query runs asynchrounously: " << nextQueryIndex << endl; 
 #endif
-        checkSum->asyncRun(ioService, nextQueryIndex++);
-        asyncJoins.push_back(std::move(checkSum));
-        return "";
-    }
-
-    checkSum->run();
-
-    stringstream out;
-    auto& results=checkSum->checkSums;
-    for (unsigned i=0;i<results.size();++i) {
-        out << (checkSum->resultSize==0?"NULL":to_string(results[i]));
-        if (i<results.size()-1)
-            out << " ";
-    }
-    out << "\n";
-    return out.str();
+	checkSum->asyncRun(ioService, nextQueryIndex++);
+	asyncJoins.push_back(std::move(checkSum));
 }
 //---------------------------------------------------------------------------

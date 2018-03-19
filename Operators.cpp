@@ -50,19 +50,12 @@ unsigned Scan::getResultTupleSize() {
     return resultColumns.size()*8; 
 }
 //---------------------------------------------------------------------------
-void Scan::run()
-// Run
-{
-// Nothing to do
-    resultSize=relation.size;
-}
-//---------------------------------------------------------------------------
 void Scan::asyncRun(boost::asio::io_service& ioService) {
 #ifdef VERBOSE
     cout << "Scan("<< queryIndex << "," << operatorIndex <<")::asyncRun, Task" << endl;
 #endif
     pendingAsyncOperator = 1;
-    run();
+    resultSize=relation.size;
     finishAsyncRun(ioService, true);
 }
 //---------------------------------------------------------------------------
@@ -110,19 +103,6 @@ bool FilterScan::applyFilter(uint64_t i,FilterInfo& f)
             return compareCol[i]<constant;
     };
     return false;
-}
-//---------------------------------------------------------------------------
-void FilterScan::run()
-// Run
-{
-    for (uint64_t i=0;i<relation.size;++i) {
-        bool pass=true;
-        for (auto& f : filters) {
-            pass&=applyFilter(i,f);
-        }
-        if (pass)
-            copy2Result(i);
-    }
 }
 //---------------------------------------------------------------------------
 void FilterScan::asyncRun(boost::asio::io_service& ioService) {
@@ -252,173 +232,6 @@ void Join::copy2Result(uint64_t leftId,uint64_t rightId)
     ++resultSize;
     */
 }
-//---------------------------------------------------------------------------
-
-void Join::run()
-  // Run
-{
-    throw;
-    /*
-  if (runInput) {
-     left->require(pInfo.left);
-     right->require(pInfo.right);
-     left->run();
-     right->run();
-   }
-*/
-  // Use smaller input for build
-  /*
-  if (left->resultSize>right->resultSize) {
-    swap(left,right);
-    swap(pInfo.left,pInfo.right);
-    swap(requestedColumnsLeft,requestedColumnsRight);
-  }
-  auto leftInputData=left->getResults();
-  auto rightInputData=right->getResults();
-
-  // Resolve the input columns
-  unsigned resColId=0;
-  for (auto& info : requestedColumnsLeft) {
-    copyLeftData.push_back(leftInputData[left->resolve(info)]);
-    select2ResultColId[info]=resColId++;
-  }
-  for (auto& info : requestedColumnsRight) {
-    copyRightData.push_back(rightInputData[right->resolve(info)]);
-    select2ResultColId[info]=resColId++;
-  }
-
-  auto leftColId=left->resolve(pInfo.left);
-  auto rightColId=right->resolve(pInfo.right);
-
-  // Build phase
-  auto leftKeyColumn=leftInputData[leftColId];
-  //hashTable.reserve(left->resultSize*2);
-  for (uint64_t i=0,limit=i+left->resultSize;i!=limit;++i) {
-    hashTable.emplace(leftKeyColumn[i],i);
-  }
-  // Probe phase
-  auto rightKeyColumn=rightInputData[rightColId];
-  for (uint64_t i=0,limit=i+right->resultSize;i!=limit;++i) {
-    auto rightKey=rightKeyColumn[i];
-    auto range=hashTable.equal_range(rightKey);
-    for (auto iter=range.first;iter!=range.second;++iter) {
-      copy2Result(iter->second,i);
-    }
-  }
-*/
-}
-
-//void Join::run()
-// Run
-//{
-    /*
-    left->require(pInfo.left);
-    right->require(pInfo.right);
-    left->run();
-    right->run();
-*/
-/*
-    // Use smaller input for build
-    if (left->resultSize>right->resultSize) {
-        swap(left,right);
-        swap(pInfo.left,pInfo.right);
-        swap(requestedColumnsLeft,requestedColumnsRight);
-    }
-
-    auto leftInputData=left->getResults();
-    auto rightInputData=right->getResults();
-
-    // Resolve the input columns
-    unsigned resColId=0;
-    for (auto& info : requestedColumnsLeft) {
-        copyLeftData.push_back(leftInputData[left->resolve(info)]);
-        select2ResultColId[info]=resColId++;
-    }
-    for (auto& info : requestedColumnsRight) {
-        copyRightData.push_back(rightInputData[right->resolve(info)]);
-        select2ResultColId[info]=resColId++;
-    }
-
-    auto leftColId=left->resolve(pInfo.left);
-    auto rightColId=right->resolve(pInfo.right);
-
-    // Build phase
-    auto leftKeyColumn=leftInputData[leftColId];
-    //hashTable.reserve(left->resultSize*2);
-   
-    vector<thread> workers;
-    const int thread_num = 20;
-    uint64_t limit = left->resultSize;
-    
-
-    for (int i=0; i<thread_num; i++) {
-        int length = limit/(thread_num-1);
-        int start = i*length;
-        if ( i == thread_num-1) {
-            length = limit%(thread_num-1);
-        }
-        if (length == 0)
-            continue;
-        workers.push_back(thread([&, start, length](){ 
-            for (uint64_t i=start,limit=start+length;i!=limit;++i) {        
-                hashTable.insert(make_pair(leftKeyColumn[i],i));
-            }
-        }));
-    }
-    for (auto& worker : workers) {
-        worker.join();
-    }
-
-    // Probe phase
-    auto rightKeyColumn=rightInputData[rightColId];
-
-    limit = right->resultSize;    
-    vector<thread> workers2;
-    
-    mutex mt;
-    for (int i=0; i<thread_num; i++) {
-        int length = limit/(thread_num-1);
-        int start = i*length;
-        if (i == thread_num-1) {
-            length = limit%(thread_num-1);
-        }
-        if (length == 0)
-            continue;
-        workers2.push_back(thread([&, start, length](){ 
-            vector<vector<uint64_t>> localResults;
-            for (unsigned i=0; i<requestedColumns.size(); i++)
-                localResults.emplace_back();
-            for (uint64_t i=start,limit=start+length;i!=limit;++i) {        
-                auto rightKey=rightKeyColumn[i];
-                auto range=hashTable.equal_range(rightKey);
-                for (auto iter=range.first;iter!=range.second;++iter) {
-                    //copy2Result(iter->second,i);
-                    unsigned relColId=0;
-                    
-                    for (unsigned cId=0;cId<copyLeftData.size();++cId)
-                        localResults[relColId++].push_back(copyLeftData[cId][iter->second]);
-
-                    for (unsigned cId=0;cId<copyRightData.size();++cId)
-                        localResults[relColId++].push_back(copyRightData[cId][i]);
-                }
-            }
-            
-            mt.lock();
-            for (unsigned i=0; i<requestedColumns.size(); i++)  {
-                tmpResults[i].insert(tmpResults[i].end(), localResults[i].begin(), localResults[i].end());
-            }
-            resultSize += localResults[0].size();
-            mt.unlock();
-            
-        }));
-    }
-  
-    for (auto& worker : workers2) {
-        worker.join();
-    }
-    
-}
-*/
 //---------------------------------------------------------------------------
 void Join::asyncRun(boost::asio::io_service& ioService) {
 #ifdef VERBOSE
@@ -767,73 +580,6 @@ sub_join_finish:
     //일단은 그냥 left로 building하자. 나중에 최적화된 방법으로 ㄲ
     
 }
-
-//---------------------------------------------------------------------------
-// lrKeys : 0 : left, 1: right
-/* 
-void Join::buildingTask(boost::asio::io_service* ioService, vector<uint64_t*> lrKeys, unsigned start, unsigned length) {
-    for (uint64_t i=start,limit=start+length;i!=limit;++i) {        
-        hashTable.insert(make_pair(lrKeys[0][i],i));
-    }
-    int remainder = __sync_sub_and_fetch(&pendingBuildingHashtable, 1);
-    if (remainder == 0) { 
-        unsigned limit = right->resultSize;
-        const unsigned partitionSize = L2_SIZE/2;
-        const unsigned taskNum = CNT_PARTITIONS(right->getResultsSize(), partitionSize);
-        //const unsigned taskNum = ((right->getResultsSize())+(L2_SIZE/2-1))/(L2_SIZE/2); 
-        // @TODO cachemiis may occur when a tuple is int the middle of partitioning point
-        pendingProbingHashtable = taskNum;
-#ifdef VERBOSE
-    cout << "Join("<< queryIndex << "," << operatorIndex <<")::createAsyncTasks right_table_size(" << right->operatorIndex <<  "): "<< limit << " tuples " <<  right->getResultsSize()/1024.0 << "KB" << endl << "-> create #probingTask: "<< taskNum << " partitionSize: " << (partitionSize/right->getResultTupleSize()) << " tuples(size:" << right->getResultTupleSize() << ")" << endl;
-#endif
-        __sync_synchronize(); // for hash table
-        //int length_p = limit/(taskNum);
-        int length_p = partitionSize/right->getResultTupleSize();
-        for (unsigned i=0; i<taskNum; i++) {
-            int start_p = i*length_p;
-            if (i == taskNum-1) { //  
-                length_p = limit%length_p;
-            }
-            ioService->post(bind(&Join::probingTask, this, ioService, lrKeys, start_p, length_p));
-        }
-        
-    }
-    
-}
-void Join::probingTask(boost::asio::io_service* ioService, vector<uint64_t*> lrKeys, unsigned start, unsigned length) { 
-    vector<vector<uint64_t>> localResults;
-    unsigned rightKeyChecksum = 0;
-    for (unsigned i=0; i<requestedColumns.size(); i++)
-        localResults.emplace_back();
-    for (uint64_t i=start,limit=start+length;i!=limit;++i) {        
-        auto rightKey=lrKeys[1][i];
-        rightKeyChecksum += rightKey;
-        auto range=hashTable.equal_range(rightKey);
-        for (auto iter=range.first;iter!=range.second;++iter) {
-            unsigned relColId=0; 
-            for (unsigned cId=0;cId<copyLeftData.size();++cId)
-                localResults[relColId++].push_back(copyLeftData[cId][iter->second]);
-
-            for (unsigned cId=0;cId<copyRightData.size();++cId)
-                localResults[relColId++].push_back(copyRightData[cId][i]);
-        }
-    } 
-    localMt.lock(); 
-    for (unsigned i=0; i<requestedColumns.size(); i++)  {
-        tmpResults[i].insert(tmpResults[i].end(), localResults[i].begin(), localResults[i].end());
-    }
-    resultSize += localResults[0].size();
-    localMt.unlock();
-
-    int remainder = __sync_sub_and_fetch(&pendingProbingHashtable, 1);
-    if (remainder == 0) {
-#ifdef VERBOSE
-    cout << "Join("<< queryIndex << "," << operatorIndex <<")::asyncRun end result_table: " << resultSize << " tuples "<< "used_hash_size: " << hashTable.size() << endl;
-#endif
-        finishAsyncRun(*ioService, true);
-    }
-}
-*/
 //---------------------------------------------------------------------------
 void SelfJoin::copy2Result(uint64_t id)
 // Copy to result
@@ -854,33 +600,6 @@ bool SelfJoin::require(SelectInfo info)
         return true;
     }
     return false;
-}
-//---------------------------------------------------------------------------
-void SelfJoin::run()
-// Run
-{
-    /*
-    input->require(pInfo.left);
-    input->require(pInfo.right);
-    input->run();
-    */
-    inputData=input->getResults();
-
-    for (auto& iu : requiredIUs) {
-        auto id=input->resolve(iu);
-        copyData.emplace_back(inputData[id]);
-        select2ResultColId.emplace(iu,copyData.size()-1);
-    }
-
-    auto leftColId=input->resolve(pInfo.left);
-    auto rightColId=input->resolve(pInfo.right);
-
-    auto leftCol=inputData[leftColId];
-    auto rightCol=inputData[rightColId];
-    for (uint64_t i=0;i<input->resultSize;++i) {
-        if (leftCol[i]==rightCol[i])
-            copy2Result(i);
-    }
 }
 //---------------------------------------------------------------------------
 void SelfJoin::asyncRun(boost::asio::io_service& ioService) {
@@ -904,35 +623,29 @@ void SelfJoin::createAsyncTasks(boost::asio::io_service& ioService) {
     // can be parallize
     ioService.post([&]() {
 #ifdef VERBOSE
-    cout << "SelfJoin("<< queryIndex << "," << operatorIndex <<"):: run task" << endl;
+		cout << "SelfJoin("<< queryIndex << "," << operatorIndex <<"):: run task" << endl;
 #endif
 //        cout << "SelfJoin::Task" << endl;
-        run(); // call parallized task 
+		inputData=input->getResults();
+
+		for (auto& iu : requiredIUs) {
+			auto id=input->resolve(iu);
+			copyData.emplace_back(inputData[id]);
+			select2ResultColId.emplace(iu,copyData.size()-1);
+		}
+
+		auto leftColId=input->resolve(pInfo.left);
+		auto rightColId=input->resolve(pInfo.right);
+
+		auto leftCol=inputData[leftColId];
+		auto rightCol=inputData[rightColId];
+		for (uint64_t i=0;i<input->resultSize;++i) {
+			if (leftCol[i]==rightCol[i])
+				copy2Result(i);
+		}
         finishAsyncRun(ioService, true);
     });        
             
-}
-//---------------------------------------------------------------------------
-void Checksum::run()
-// Run
-{
-    /*
-    for (auto& sInfo : yncOperatorolInfo) {
-        input->require(sInfo);
-    }
-    input->run();
-    */
-    auto results=input->getResults();
-
-    for (auto& sInfo : colInfo) {
-        auto colId=input->resolve(sInfo);
-        auto resultCol=results[colId];
-        uint64_t sum=0;
-        resultSize=input->resultSize;
-        for (auto iter=resultCol,limit=iter+input->resultSize;iter!=limit;++iter)
-            sum+=*iter;
-        checkSums.push_back(sum);
-    }
 }
 //---------------------------------------------------------------------------
 void Checksum::asyncRun(boost::asio::io_service& ioService, int queryIndex) {
@@ -958,9 +671,19 @@ void Checksum::createAsyncTasks(boost::asio::io_service& ioService) {
     // can be parallize
     ioService.post([&]() {
 #ifdef VERBOSE
-    cout << "Checksum("<< queryIndex << "," << operatorIndex <<"):: run task" << endl;
+		cout << "Checksum("<< queryIndex << "," << operatorIndex <<"):: run task" << endl;
 #endif
-        run(); // call parallized task 
+		auto results=input->getResults();
+
+		for (auto& sInfo : colInfo) {
+			auto colId=input->resolve(sInfo);
+			auto resultCol=results[colId];
+			uint64_t sum=0;
+			resultSize=input->resultSize;
+			for (auto iter=resultCol,limit=iter+input->resultSize;iter!=limit;++iter)
+				sum+=*iter;
+			checkSums.push_back(sum);
+		}
         finishAsyncRun(ioService, false);
 //        cout << "Checksum::Task" << endl;
     });        

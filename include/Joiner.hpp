@@ -45,7 +45,7 @@ class Joiner {
     /// Get relation
     Relation& getRelation(unsigned id);
     /// Joins a given set of relations
-    std::string join(QueryInfo& i, bool async=true);
+    void join(QueryInfo& i);
     /// wait for async joins
     void waitAsyncJoins();
     /// return parsed asyncResults 

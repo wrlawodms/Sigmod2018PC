@@ -57,8 +57,6 @@ public:
     virtual bool require(SelectInfo info) = 0;
     /// Resolves a column
     unsigned resolve(SelectInfo info) { assert(select2ResultColId.find(info)!=select2ResultColId.end()); return select2ResultColId[info]; }
-    /// Run
-    virtual void run() = 0;
     /// AsyncRun
     virtual void asyncRun(boost::asio::io_service& ioService) = 0;
     /// only call it if pendingAsyncOperator=0, and can getResults()
@@ -91,8 +89,6 @@ public:
     Scan(Relation& r,unsigned relationBinding) : relation(r), relationBinding(relationBinding) {};
     /// Require a column and add it to results
     bool require(SelectInfo info) override;
-    /// Run
-    void run() override;
     /// AsyncRun
     virtual void asyncRun(boost::asio::io_service& ioService) override;
     /// Get  materialized results
@@ -122,8 +118,6 @@ public:
     FilterScan(Relation& r,FilterInfo& filterInfo) : FilterScan(r,std::vector<FilterInfo>{filterInfo}) {};
     /// Require a column and add it to results
     bool require(SelectInfo info) override;
-    /// Run
-    void run() override;
     /// AsyncRun
     virtual void asyncRun(boost::asio::io_service& ioService) override;
     /// only call it if pendingAsyncOperator=0, and can getResults()
@@ -194,8 +188,6 @@ public:
     Join(std::shared_ptr<Operator>& left,std::shared_ptr<Operator>& right,PredicateInfo pInfo) : left(left), right(right), pInfo(pInfo) {};
     /// Require a column and add it to results
     bool require(SelectInfo info) override;
-    /// Run
-    void run() override;
     /// AsyncRun
     virtual void asyncRun(boost::asio::io_service& ioService) override;
     /// only call it if pendingAsyncOperator=0, and can getResults()
@@ -237,8 +229,6 @@ public:
     SelfJoin(std::shared_ptr<Operator>& input,PredicateInfo pInfo) : input(input), pInfo(pInfo) {};
     /// Require a column and add it to results
     bool require(SelectInfo info) override;
-    /// Run
-    void run() override;
     /// AsyncRun
     virtual void asyncRun(boost::asio::io_service& ioService) override;
     /// only call it if pendingAsyncOperator=0, and can getResults()
@@ -262,8 +252,6 @@ public:
     Checksum(Joiner& joiner, std::shared_ptr<Operator>& input,std::vector<SelectInfo> colInfo) : joiner(joiner), input(input), colInfo(colInfo) {};
     /// Request a column and add it to results
     bool require(SelectInfo info) override { throw; /* check sum is always on the highest level and thus should never request anything */ }
-    /// Run
-    void run() override;
     /// AsyncRun
     virtual void asyncRun(boost::asio::io_service& ioService, int queryIndex);
     virtual void asyncRun(boost::asio::io_service& ioService) {}

@@ -43,4 +43,4 @@ ADD_CUSTOM_TARGET(link_target ALL
   ${CMAKE_CURRENT_BINARY_DIR}/workloads)
 
 #add_definitions(-DVERBOSE)
-add_definitions(-DMONITOR_ASYNC_JOIN)
+#add_definitions(-DMONITOR_ASYNC_JOIN)

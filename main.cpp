@@ -41,7 +41,7 @@ int main(int argc, char* argv[]) {
             continue;
         }
         i.parseQuery(line);
-        joiner.join(i, true);
+        joiner.join(i);
         //cout << joiner.join(i);
     }
     return 0;
