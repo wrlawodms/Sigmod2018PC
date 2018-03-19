@@ -36,18 +36,16 @@ bool Scan::require(SelectInfo info)
     }
     assert(info.colId<relation.columns.size());
     if (select2ResultColId.find(info)==select2ResultColId.end()) {
-        resultColumns.push_back(relation.columns[info.colId]);
-        select2ResultColId[info]=resultColumns.size()-1;
+//        resultColumns.push_back(relation.columns[info.colId]);
+        results.emplace_back();
+		results[results.size()-1].addTuples(relation.columns[info.colId], relation.size);
+		select2ResultColId[info]=results.size()-1;
     }
     return true;
 }
 //---------------------------------------------------------------------------
 unsigned Scan::getResultsSize() {
-    return resultColumns.size()*relation.size*8; 
-}
-//---------------------------------------------------------------------------
-unsigned Scan::getResultTupleSize() {
-    return resultColumns.size()*8; 
+    return results.size()*relation.size*8; 
 }
 //---------------------------------------------------------------------------
 void Scan::asyncRun(boost::asio::io_service& ioService) {
@@ -59,12 +57,6 @@ void Scan::asyncRun(boost::asio::io_service& ioService) {
     finishAsyncRun(ioService, true);
 }
 //---------------------------------------------------------------------------
-vector<uint64_t*> Scan::getResults()
-// Get materialized results
-{
-    return resultColumns;
-}
-//---------------------------------------------------------------------------
 bool FilterScan::require(SelectInfo info)
 // Require a column and add it to results
 {
@@ -74,19 +66,12 @@ bool FilterScan::require(SelectInfo info)
     if (select2ResultColId.find(info)==select2ResultColId.end()) {
         // Add to results
         inputData.push_back(relation.columns[info.colId]);
-        tmpResults.emplace_back();
-        unsigned colId=tmpResults.size()-1;
+//        tmpResults.emplace_back();
+		results.emplace_back();
+        unsigned colId=results.size()-1;
         select2ResultColId[info]=colId;
     }
     return true;
-}
-//---------------------------------------------------------------------------
-void FilterScan::copy2Result(uint64_t id)
-// Copy to result
-{
-    for (unsigned cId=0;cId<inputData.size();++cId)
-        tmpResults[cId].push_back(inputData[cId][id]);
-    ++resultSize;
 }
 //---------------------------------------------------------------------------
 bool FilterScan::applyFilter(uint64_t i,FilterInfo& f)
@@ -112,9 +97,6 @@ void FilterScan::asyncRun(boost::asio::io_service& ioService) {
     pendingAsyncOperator = 1;
     __sync_synchronize();
     createAsyncTasks(ioService);  
-    //run();
-    //finishAsyncRun(ioService, true);
-//    cout << "FilterScan::asyncRun" << endl;
 }
 
 //---------------------------------------------------------------------------
@@ -124,8 +106,16 @@ void FilterScan::createAsyncTasks(boost::asio::io_service& ioService) {
 #endif  
     //const unsigned partitionSize = L2_SIZE/2;
     //const unsigned taskNum = CNT_PARTITIONS(relation.size*relation.columns.size()*8, partitionSize);
-    const unsigned taskNum = THREAD_NUM;
+	const unsigned taskNum = THREAD_NUM;
     pendingTask = taskNum;
+
+	for (int i=0; i<taskNum; i++) {
+		tmpResults.emplace_back();
+		for (int j=0; j<inputData.size(); j++) {
+			tmpResults[i].emplace_back();
+		}
+	}
+	
     __sync_synchronize(); 
     // unsigned length = partitionSize/(relation.columns.size()*8); 
     unsigned length = (relation.size+taskNum-1)/taskNum;
@@ -134,24 +124,12 @@ void FilterScan::createAsyncTasks(boost::asio::io_service& ioService) {
         if (i == taskNum-1 && relation.size%length) {
             length = relation.size%length;
         }
-        ioService.post(bind(&FilterScan::filterTask, this, &ioService, start, length)); 
-        /*
-        ioService.post([&, start, legnth]() {
-#ifdef VERBOSE
-            cout << "FilterScan("<< queryIndex << "," << operatorIndex <<")::Task start: " << start << " length: " << length << endl;
-#endif
-            
-            finishAsyncRun(ioService, true);
-        });  
-        */      
+        ioService.post(bind(&FilterScan::filterTask, this, &ioService, i, start, length)); 
     }
 }
 //---------------------------------------------------------------------------
-void FilterScan::filterTask(boost::asio::io_service* ioService, unsigned start, unsigned length) {
-    vector<vector<uint64_t>> localResults;
-    for (unsigned i=0; i<inputData.size(); i++) {
-        localResults.emplace_back();
-    }
+void FilterScan::filterTask(boost::asio::io_service* ioService, int taskIndex, unsigned start, unsigned length) {
+    vector<vector<uint64_t>>& localResults = tmpResults[taskIndex];
     for (unsigned i=start;i<start+length;++i) {
         bool pass=true;
         for (auto& f : filters) {
@@ -163,10 +141,9 @@ void FilterScan::filterTask(boost::asio::io_service* ioService, unsigned start, 
         }
     }
 
-    
     localMt.lock();
     for (unsigned cId=0;cId<inputData.size();++cId) {
-        tmpResults[cId].insert(tmpResults[cId].end(), localResults[cId].begin(), localResults[cId].end()); 
+		results[cId].addTuples(localResults[cId].data(), localResults[cId].size());
     }
     resultSize += localResults[0].size();
     localMt.unlock();
@@ -178,22 +155,18 @@ void FilterScan::filterTask(boost::asio::io_service* ioService, unsigned start, 
 }
 
 //---------------------------------------------------------------------------
-vector<uint64_t*> Operator::getResults()
+vector<Column<uint64_t>>& Operator::getResults()
 // Get materialized results
 {
-    vector<uint64_t*> resultVector;
-    for (auto& c : tmpResults) {
-        resultVector.push_back(c.data());
-    }
-    return resultVector;
+//    vector<uint64_t*> resultVector;
+//    for (auto& c : tmpResults) {
+//        resultVector.push_back(c.data());
+//    }
+    return results;
 }
 //---------------------------------------------------------------------------
 unsigned Operator::getResultsSize() {
-    return resultSize*tmpResults.size()*8;
-}
-//---------------------------------------------------------------------------
-unsigned Operator::getResultTupleSize() {
-    return tmpResults.size()*8;
+    return resultSize*results.size()*8;
 }
 //---------------------------------------------------------------------------
 bool Join::require(SelectInfo info)
@@ -211,26 +184,10 @@ bool Join::require(SelectInfo info)
         if (!success)
             return false;
 
-        tmpResults.emplace_back();
+        results.emplace_back();
         requestedColumns.emplace(info);
     }
     return true;
-}
-//---------------------------------------------------------------------------
-void Join::copy2Result(uint64_t leftId,uint64_t rightId)
-// Copy to result
-{
-    throw;
-    //if array, cache util is better, becaouse now, each columns in tmpResults are seperated
-    /*
-    unsigned relColId=0;
-    for (unsigned cId=0;cId<copyLeftData.size();++cId)
-        tmpResults[relColId++].push_back(copyLeftData[cId][leftId]);
-
-    for (unsigned cId=0;cId<copyRightData.size();++cId)
-        tmpResults[relColId++].push_back(copyRightData[cId][rightId]);
-    ++resultSize;
-    */
 }
 //---------------------------------------------------------------------------
 void Join::asyncRun(boost::asio::io_service& ioService) {
@@ -258,8 +215,8 @@ void Join::createAsyncTasks(boost::asio::io_service& ioService) {
         swap(requestedColumnsLeft,requestedColumnsRight);
     }
 
-    auto leftInputData=left->getResults();
-    auto rightInputData=right->getResults(); 
+    auto& leftInputData=left->getResults();
+    auto& rightInputData=right->getResults(); 
 
     unsigned resColId = 0;
     for (auto& info : requestedColumnsLeft) {
@@ -283,8 +240,8 @@ void Join::createAsyncTasks(boost::asio::io_service& ioService) {
 #ifdef VERBOSE
     cout << "Join("<< queryIndex << "," << operatorIndex <<") Right table size: " << right->getResultsSize() << " cnt_tuple: " << right->resultSize << " Left table size: " << left->getResultsSize() << " cnt_tuple: " << left->resultSize << " cntPartition: " << cntPartition << endl;
 #endif
-    /*
-	if (cntPartition == 1) {
+	/*
+    if (cntPartition == 1) {
         pendingSubjoin = 1;
         __sync_synchronize();
         ioService.post(bind(&Join::subJoinTask, this, &ioService, leftInputData, left->resultSize, rightInputData, right->resultSize));
@@ -292,7 +249,6 @@ void Join::createAsyncTasks(boost::asio::io_service& ioService) {
     }*/
     
     pendingPartitioning = 2;
-    // must use jemalloc
     partitionTable[0] = (uint64_t*)malloc(left->getResultsSize());
     partitionTable[1] = (uint64_t*)malloc(right->getResultsSize());
     
@@ -306,6 +262,10 @@ void Join::createAsyncTasks(boost::asio::io_service& ioService) {
         for (unsigned j=0; j<rightInputData.size(); j++) {
             partition[1][i].emplace_back();
         }
+		tmpResults.emplace_back();
+		for (unsigned j=0; j<requestedColumns.size(); j++) {
+			tmpResults[i].emplace_back();
+		}
     }
     
         // @TODO cachemiis may occur when a tuple is int the middle of partitioning point
@@ -393,18 +353,20 @@ void Join::createAsyncTasks(boost::asio::io_service& ioService) {
 
 //---------------------------------------------------------------------------
 void Join::histogramTask(boost::asio::io_service* ioService, int cntTask, int taskIndex, int leftOrRight, unsigned start, unsigned length) {
-    uint64_t* keyColumn;
-    vector<uint64_t*> inputData = left->getResults();
-    if (!leftOrRight) { 
+    vector<Column<uint64_t>>& inputData = !leftOrRight ? left->getResults() : right->getResults();
+    Column<uint64_t>& keyColumn = !leftOrRight ? inputData[leftColId] : inputData[rightColId];
+    /*
+	if (!leftOrRight) { 
         inputData = left->getResults();
         keyColumn = inputData[leftColId];
     } else {
         inputData = right->getResults();
         keyColumn = inputData[rightColId];
     }
-    
-    for (unsigned i=start,limit=start+length; i<limit; i++) {
-        histograms[leftOrRight][taskIndex][RADIX_HASH(keyColumn[i], cntPartition)]++; // cntPartition으로 나뉠 수 있도록하는 HASH
+    */
+	auto it = keyColumn.begin(start);
+    for (unsigned i=start,limit=start+length; i<limit; i++, ++it) {
+        histograms[leftOrRight][taskIndex][RADIX_HASH(*it, cntPartition)]++; // cntPartition으로 나뉠 수 있도록하는 HASH
     }
     int remainder = __sync_sub_and_fetch(&pendingMakingHistogram[leftOrRight], 1);
     if (remainder == 0) { // gogo scattering
@@ -453,7 +415,10 @@ void Join::histogramTask(boost::asio::io_service* ioService, int cntTask, int ta
 }
 //---------------------------------------------------------------------------
 void Join::scatteringTask(boost::asio::io_service* ioService, int taskIndex, int leftOrRight, unsigned start, unsigned length) {
-    uint64_t* keyColumn;
+    vector<Column<uint64_t>>& inputData = !leftOrRight ? left->getResults() : right->getResults();
+    Column<uint64_t>& keyColumn = !leftOrRight ? inputData[leftColId] : inputData[rightColId];
+    /*
+	uint64_t* keyColumn;
     vector<uint64_t*> inputData;
     if (!leftOrRight) { 
         inputData = left->getResults();
@@ -461,15 +426,22 @@ void Join::scatteringTask(boost::asio::io_service* ioService, int taskIndex, int
     } else {
         inputData = right->getResults();
         keyColumn = inputData[rightColId];
-    }
+    }*/
     // copy histogram for cache
     vector<unsigned> insertOffs;
     for (int i=0; i<cntPartition; i++) { 
         insertOffs.push_back(0);
     }
     //copyHist.insert(copyHist.end(), histograms[leftOrRight][taskIndex].begin(), histograms[leftOrRight][taskIndex].end());
-    for (unsigned i=start, limit=start+length; i<limit; i++) {
-        unsigned hashResult = RADIX_HASH(keyColumn[i], cntPartition);
+    
+	auto keyIt = keyColumn.begin(start);
+	vector<Column<uint64_t>::Iterator> colIt;
+	
+	for (unsigned i=0; i<inputData.size(); i++) {
+		colIt.push_back(inputData[i].begin(start));
+	}
+	for (unsigned i=start, limit=start+length; i<limit; i++, ++keyIt) {
+        unsigned hashResult = RADIX_HASH(*keyIt, cntPartition);
         unsigned insertBase;
         unsigned insertOff = insertOffs[hashResult];
         
@@ -479,14 +451,8 @@ void Join::scatteringTask(boost::asio::io_service* ioService, int taskIndex, int
             insertBase = histograms[leftOrRight][taskIndex-1][hashResult];
         }
         for (unsigned j=0; j<inputData.size(); j++) {
-            // unsigned& tupleIdx = histograms[leftOrRight][taskIndex][hashResult];
-            // << it may cause hard invalication storm
-            auto a =partition[leftOrRight][hashResult];
-            auto b =  partition[leftOrRight][hashResult][j];
-            auto c = partition[leftOrRight][hashResult][j][insertBase+insertOff];
-            partition[leftOrRight][hashResult][j][insertBase+insertOff] = inputData[j][i];
-            // tupleIdx++; 
-            // cout << pthread_self() << " " <<queryIndex<< " " << operatorIndex << " "<< taskIndex << " task "<< leftOrRight << " lr "<< j << " column " << insertBase+insertOff << " tuple: " << inputData[j][i] << "to part " << hashResult << endl;
+            partition[leftOrRight][hashResult][j][insertBase+insertOff] = *(colIt[j]);
+			++(colIt[j]);
         }
         insertOffs[hashResult]++;
     }
@@ -501,18 +467,18 @@ void Join::scatteringTask(boost::asio::io_service* ioService, int taskIndex, int
 #endif
             int taskNum = cntPartition;
             for (int i=0; i<taskNum; i++) {
-                ioService->post(bind(&Join::subJoinTask, this, ioService, partition[0][i], partitionLength[0][i], partition[1][i], partitionLength[1][i]));
+                ioService->post(bind(&Join::subJoinTask, this, ioService, i, partition[0][i], partitionLength[0][i], partition[1][i], partitionLength[1][i]));
                  // cout << "Join("<< queryIndex << "," << operatorIndex <<")" << " Part Size(L,R) (" << i << "): " << partitionLength[0][i] << ", " << partitionLength[1][i] << endl;
             }
         }
     }
 }
 
-void Join::subJoinTask(boost::asio::io_service* ioService, vector<uint64_t*> localLeft, unsigned limitLeft, vector<uint64_t*> localRight, unsigned limitRight) {
+void Join::subJoinTask(boost::asio::io_service* ioService, int taskIndex, vector<uint64_t*> localLeft, unsigned limitLeft, vector<uint64_t*> localRight, unsigned limitRight) {
     unordered_multimap<uint64_t, uint64_t> hashTable;
     // Resolve the partitioned columns
     std::vector<uint64_t*> copyLeftData,copyRightData;
-    vector<vector<uint64_t>> localResults;
+    vector<vector<uint64_t>>& localResults = tmpResults[taskIndex];
     uint64_t* leftKeyColumn = localLeft[leftColId];
     uint64_t* rightKeyColumn = localRight[rightColId];
     std::set<unsigned> leftSet;
@@ -542,7 +508,6 @@ void Join::subJoinTask(boost::asio::io_service* ioService, vector<uint64_t*> loc
         auto rightKey=rightKeyColumn[i];
         auto range=hashTable.equal_range(rightKey);
         for (auto iter=range.first;iter!=range.second;++iter) {
-            //copy2Result(iter->second,i);
             unsigned relColId=0;
             for (unsigned cId=0;cId<copyLeftData.size();++cId)
                 localResults[relColId++].push_back(copyLeftData[cId][iter->second]);
@@ -558,7 +523,7 @@ void Join::subJoinTask(boost::asio::io_service* ioService, vector<uint64_t*> loc
         goto sub_join_finish;
     localMt.lock();
     for (unsigned i=0; i<requestedColumns.size(); i++)  {
-        tmpResults[i].insert(tmpResults[i].end(), localResults[i].begin(), localResults[i].end());
+		results[i].addTuples(localResults[i].data(), localResults[i].size());
     }
     resultSize += localResults[0].size();
     localMt.unlock();
@@ -582,9 +547,6 @@ sub_join_finish:
 void SelfJoin::copy2Result(uint64_t id)
 // Copy to result
 {
-    for (unsigned cId=0;cId<copyData.size();++cId)
-        tmpResults[cId].push_back(copyData[cId][id]);
-    ++resultSize;
 }
 //---------------------------------------------------------------------------
 bool SelfJoin::require(SelectInfo info)
@@ -594,6 +556,7 @@ bool SelfJoin::require(SelectInfo info)
         return true;
     if(input->require(info)) {
         tmpResults.emplace_back();
+		results.emplace_back();
         requiredIUs.emplace(info);
         return true;
     }
@@ -609,7 +572,6 @@ void SelfJoin::asyncRun(boost::asio::io_service& ioService) {
     input->require(pInfo.right);
     __sync_synchronize();
     input->asyncRun(ioService);
-//    cout << "SelfJoin::asyncRun" << endl;
 }
 
 //---------------------------------------------------------------------------
@@ -624,22 +586,41 @@ void SelfJoin::createAsyncTasks(boost::asio::io_service& ioService) {
 		cout << "SelfJoin("<< queryIndex << "," << operatorIndex <<"):: run task" << endl;
 #endif
 //        cout << "SelfJoin::Task" << endl;
-		inputData=input->getResults();
+		auto& inputData=input->getResults();
 
 		for (auto& iu : requiredIUs) {
 			auto id=input->resolve(iu);
-			copyData.emplace_back(inputData[id]);
+			copyData.emplace_back(&inputData[id]);
 			select2ResultColId.emplace(iu,copyData.size()-1);
 		}
 
 		auto leftColId=input->resolve(pInfo.left);
 		auto rightColId=input->resolve(pInfo.right);
 
-		auto leftCol=inputData[leftColId];
-		auto rightCol=inputData[rightColId];
+		auto leftColIt=inputData[leftColId].begin(0);
+		auto rightColIt=inputData[rightColId].begin(0);
+
+		
+		vector<Column<uint64_t>::Iterator> colIt;
+		
+		for (unsigned i=0; i<copyData.size(); i++) {
+			colIt.push_back(copyData[i]->begin(0));
+		}
 		for (uint64_t i=0;i<input->resultSize;++i) {
-			if (leftCol[i]==rightCol[i])
-				copy2Result(i);
+			if (*leftColIt==*rightColIt) {
+				for (unsigned cId=0;cId<copyData.size();++cId) {
+					tmpResults[cId].push_back(*(colIt[cId]));
+				}
+				++resultSize;
+			}
+			++leftColIt;
+			++rightColIt;
+			for (unsigned i=0; i<copyData.size(); i++) {
+				++colIt[i];
+			}
+		}
+		for (int i=0; i<tmpResults.size(); i++) {
+			results[i].addTuples(tmpResults[i].data(), tmpResults[i].size());
 		}
         finishAsyncRun(ioService, true);
     });        
@@ -671,15 +652,15 @@ void Checksum::createAsyncTasks(boost::asio::io_service& ioService) {
 #ifdef VERBOSE
 		cout << "Checksum("<< queryIndex << "," << operatorIndex <<"):: run task" << endl;
 #endif
-		auto results=input->getResults();
+		auto& results=input->getResults();
 
 		for (auto& sInfo : colInfo) {
 			auto colId=input->resolve(sInfo);
-			auto resultCol=results[colId];
+			auto resultColIt=results[colId].begin(0);
 			uint64_t sum=0;
 			resultSize=input->resultSize;
-			for (auto iter=resultCol,limit=iter+input->resultSize;iter!=limit;++iter)
-				sum+=*iter;
+			for (int i=0;i<input->resultSize;i++, ++resultColIt)
+				sum+=*resultColIt;
 			checkSums.push_back(sum);
 		}
         finishAsyncRun(ioService, false);

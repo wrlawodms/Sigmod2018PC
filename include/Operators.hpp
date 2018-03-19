@@ -15,7 +15,7 @@
 #include "Relation.hpp"
 #include "Parser.hpp"
 #include "Config.hpp"
-
+#include "Column.hpp"
 //#include "Joiner.hpp"
 
 class Joiner;
@@ -37,7 +37,8 @@ protected:
     /// Mapping from select info to data
     std::unordered_map<SelectInfo,unsigned> select2ResultColId;
     /// The materialized results
-    std::vector<uint64_t*> resultColumns;
+    std::vector<Column<uint64_t>> results;
+	//std::vector<uint64_t*> resultColumns;
     /// The tmp results
     std::vector<std::vector<uint64_t>> tmpResults;
     /// mutex for local ops to global
@@ -64,11 +65,9 @@ public:
     /// SetParnet
     void setParent(std::shared_ptr<Operator> parent) { this->parent = parent; }
     /// Get  materialized results
-    virtual std::vector<uint64_t*> getResults();
+    virtual std::vector<Column<uint64_t>>& getResults();
     /// Get materialized results size in bytes
     virtual unsigned getResultsSize();
-    // Get one tuple size of the materialized result in bytes
-    virtual unsigned getResultTupleSize();
 	// Print async info
 	virtual void printAsyncInfo() = 0;
     /// The result size
@@ -91,15 +90,14 @@ public:
     bool require(SelectInfo info) override;
     /// AsyncRun
     virtual void asyncRun(boost::asio::io_service& ioService) override;
-    /// Get  materialized results
-    virtual std::vector<uint64_t*> getResults() override;
     virtual unsigned getResultsSize() override;
-    virtual unsigned getResultTupleSize() override;
 	// Print async info
 	virtual void printAsyncInfo() override;
 };
 //---------------------------------------------------------------------------
 class FilterScan : public Scan {
+    /// The tmp results
+    std::vector<std::vector<std::vector<uint64_t>>> tmpResults; // [task][col][tuple]
     /// The filter info
     std::vector<FilterInfo> filters;
     /// The input data
@@ -123,17 +121,16 @@ public:
     /// only call it if pendingAsyncOperator=0, and can getResults()
     virtual void createAsyncTasks(boost::asio::io_service& ioService) override;
     /// create sync test
-    void filterTask(boost::asio::io_service* ioService, unsigned start, unsigned length);
-    /// Get  materialized results
-    virtual std::vector<uint64_t*> getResults() override { return Operator::getResults(); }
+    void filterTask(boost::asio::io_service* ioService, int taskIndex, unsigned start, unsigned length);
     virtual unsigned getResultsSize() override { return Operator::getResultsSize(); }
-    virtual unsigned getResultTupleSize() override { return Operator::getResultTupleSize(); }
 	// Print async info
 	virtual void printAsyncInfo() override;
     /// The result size
 };
 //---------------------------------------------------------------------------
 class Join : public Operator {
+    /// tmpResults
+	std::vector<std::vector<std::vector<uint64_t>>> tmpResults; // [partition][col][tuple]
     /// The input operators
     std::shared_ptr<Operator> left, right;
     /// The join predicate info
@@ -142,9 +139,6 @@ class Join : public Operator {
     void copy2Result(uint64_t leftId,uint64_t rightId);
     /// Create mapping for bindings
     void createMappingForBindings();
-
-    using HT=std::unordered_multimap<uint64_t,uint64_t>;
-    //using HT=tbb::concurrent_unordered_multimap<uint64_t,uint64_t>;
 
     int pendingMakingHistogram[2] = {-1,-1};
     int pendingScattering[2] = {-1,-1};
@@ -166,10 +160,8 @@ class Join : public Operator {
     void histogramTask(boost::asio::io_service* ioService, int cntTask, int taskIndex, int leftOrRight, unsigned start, unsigned length);
     void scatteringTask(boost::asio::io_service* ioService, int taskIndex, int leftOrRight, unsigned start, unsigned length); 
     // for cache, partition must be allocated sequentially 
-    void subJoinTask(boost::asio::io_service* ioService, std::vector<uint64_t*> left, unsigned leftLimit, std::vector<uint64_t*> right, unsigned rightLimit);  
+    void subJoinTask(boost::asio::io_service* ioService, int taskIndex, std::vector<uint64_t*> left, unsigned leftLimit, std::vector<uint64_t*> right, unsigned rightLimit);  
     
-    /// The hash table for the join
-    HT hashTable; // is not used in async version
     /// Columns that have to be materialized
     std::unordered_set<SelectInfo> requestedColumns;
     /// Left/right columns that have been requested
@@ -177,7 +169,7 @@ class Join : public Operator {
 
 
     /// The entire input data of left and right
-    std::vector<uint64_t*> leftInputData,rightInputData;
+    std::vector<Column<uint64_t>> leftInputData,rightInputData;
     /// The input data that has to be copied
     //std::vector<uint64_t*> copyLeftData,copyRightData;
     /// key colums
@@ -196,19 +188,6 @@ public:
 	virtual void printAsyncInfo() override;
 };
 //---------------------------------------------------------------------------
-/*class PartitioningJoin : public Operaotor {
-
-
-public:
-    /// The constructor
-    Join(std::shared_ptr<Operator>&& left,std::shared_ptr<Operator>&& right,PredicateInfo& pInfo) : left(std::move(left)), right(std::move(right)), pInfo(pInfo) {};
-    /// Require a column and add it to results
-    bool require(SelectInfo info) override;
-    /// Run
-    void run() override;
-
-}*/
-//---------------------------------------------------------------------------
 class SelfJoin : public Operator {
     /// The input operators
     std::shared_ptr<Operator> input;
@@ -219,10 +198,8 @@ class SelfJoin : public Operator {
     /// The required IUs
     std::set<SelectInfo> requiredIUs;
 
-    /// The entire input data
-    std::vector<uint64_t*> inputData;
     /// The input data that has to be copied
-    std::vector<uint64_t*> copyData;
+    std::vector<Column<uint64_t>*> copyData;
 
 public:
     /// The constructor
