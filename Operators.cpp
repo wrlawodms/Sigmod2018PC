@@ -283,12 +283,13 @@ void Join::createAsyncTasks(boost::asio::io_service& ioService) {
 #ifdef VERBOSE
     cout << "Join("<< queryIndex << "," << operatorIndex <<") Right table size: " << right->getResultsSize() << " cnt_tuple: " << right->resultSize << " Left table size: " << left->getResultsSize() << " cnt_tuple: " << left->resultSize << " cntPartition: " << cntPartition << endl;
 #endif
-    if (cntPartition == 1) {
+    /*
+	if (cntPartition == 1) {
         pendingSubjoin = 1;
         __sync_synchronize();
         ioService.post(bind(&Join::subJoinTask, this, &ioService, leftInputData, left->resultSize, rightInputData, right->resultSize));
         return;
-    }
+    }*/
     
     pendingPartitioning = 2;
     // must use jemalloc
@@ -325,18 +326,13 @@ void Join::createAsyncTasks(boost::asio::io_service& ioService) {
 	unsigned maxLengthRight = L2_SIZE/(CACHE_LINE_SIZE*rightInputData.size());
 	
 	if (taskLength[0] > maxLengthLeft) {
-		// int preLength = taskLength[0];
 		taskLength[0] = maxLengthLeft;
 		cntTaskLeft = (left->resultSize+maxLengthLeft-1)/maxLengthLeft;	
-		// cout << "Left too big length: " << preLength << " to " << maxLengthLeft << " " << cntTaskLeft << "tasks" <<  endl;
 	}
 	if (taskLength[1] > maxLengthRight) {
-		// int preLength = taskLength[1];
 		taskLength[1] = maxLengthRight;
 		cntTaskRight = (right->resultSize+maxLengthRight-1)/maxLengthRight;	
-		// cout << "Right too big length: " << preLength << " to " << maxLengthRight << " " << cntTaskRight << "tasks" << endl;
 	}
-	/*
     if (left->resultSize/cntTaskLeft < minTuplesPerTask) {
         cntTaskLeft = (left->resultSize+minTuplesPerTask-1)/minTuplesPerTask;
         taskLength[0] = minTuplesPerTask;
@@ -345,7 +341,6 @@ void Join::createAsyncTasks(boost::asio::io_service& ioService) {
         cntTaskRight = (right->resultSize+minTuplesPerTask-1)/minTuplesPerTask;
         taskLength[1] = minTuplesPerTask;
     }
-	*/
 	histograms[0].reserve(cntTaskLeft);
 	histograms[1].reserve(cntTaskRight);
     for (int i=0; i<cntTaskLeft; i++) {
@@ -486,6 +481,9 @@ void Join::scatteringTask(boost::asio::io_service* ioService, int taskIndex, int
         for (unsigned j=0; j<inputData.size(); j++) {
             // unsigned& tupleIdx = histograms[leftOrRight][taskIndex][hashResult];
             // << it may cause hard invalication storm
+            auto a =partition[leftOrRight][hashResult];
+            auto b =  partition[leftOrRight][hashResult][j];
+            auto c = partition[leftOrRight][hashResult][j][insertBase+insertOff];
             partition[leftOrRight][hashResult][j][insertBase+insertOff] = inputData[j][i];
             // tupleIdx++; 
             // cout << pthread_self() << " " <<queryIndex<< " " << operatorIndex << " "<< taskIndex << " task "<< leftOrRight << " lr "<< j << " column " << insertBase+insertOff << " tuple: " << inputData[j][i] << "to part " << hashResult << endl;
