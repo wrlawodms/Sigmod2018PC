@@ -37,8 +37,8 @@ bool Scan::require(SelectInfo info)
     assert(info.colId<relation.columns.size());
     if (select2ResultColId.find(info)==select2ResultColId.end()) {
 //        resultColumns.push_back(relation.columns[info.colId]);
-        results.emplace_back();
-		results[results.size()-1].addTuples(relation.columns[info.colId], relation.size);
+        results.emplace_back(1);
+        infos.push_back(info);
 		select2ResultColId[info]=results.size()-1;
     }
     return true;
@@ -53,6 +53,9 @@ void Scan::asyncRun(boost::asio::io_service& ioService) {
     cout << "Scan("<< queryIndex << "," << operatorIndex <<")::asyncRun, Task" << endl;
 #endif
     pendingAsyncOperator = 1;
+    for (int i=0; i<infos.size(); i++) {
+        results[i].addTuples(0, relation.columns[infos[i].colId], relation.size);
+    }
     resultSize=relation.size;
     finishAsyncRun(ioService, true);
 }
@@ -67,8 +70,7 @@ bool FilterScan::require(SelectInfo info)
         // Add to results
         inputData.push_back(relation.columns[info.colId]);
 //        tmpResults.emplace_back();
-		results.emplace_back();
-        unsigned colId=results.size()-1;
+        unsigned colId=inputData.size()-1;
         select2ResultColId[info]=colId;
     }
     return true;
@@ -108,7 +110,10 @@ void FilterScan::createAsyncTasks(boost::asio::io_service& ioService) {
     //const unsigned taskNum = CNT_PARTITIONS(relation.size*relation.columns.size()*8, partitionSize);
 	const unsigned taskNum = THREAD_NUM;
     pendingTask = taskNum;
-
+    
+    for (int i=0; i<inputData.size(); i++) {
+		results.emplace_back(taskNum);
+    }
 	for (int i=0; i<taskNum; i++) {
 		tmpResults.emplace_back();
 		for (int j=0; j<inputData.size(); j++) {
@@ -141,13 +146,12 @@ void FilterScan::filterTask(boost::asio::io_service* ioService, int taskIndex, u
         }
     }
 
-    localMt.lock();
     for (unsigned cId=0;cId<inputData.size();++cId) {
-		results[cId].addTuples(localResults[cId].data(), localResults[cId].size());
+		results[cId].addTuples(taskIndex, localResults[cId].data(), localResults[cId].size());
     }
-    resultSize += localResults[0].size();
-    localMt.unlock();
-	
+    //resultSize += localResults[0].size();
+	__sync_fetch_and_add(&resultSize, localResults[0].size());
+
     int remainder = __sync_sub_and_fetch(&pendingTask, 1);
     if (remainder == 0) {
         finishAsyncRun(*ioService, true);
@@ -184,7 +188,6 @@ bool Join::require(SelectInfo info)
         if (!success)
             return false;
 
-        results.emplace_back();
         requestedColumns.emplace(info);
     }
     return true;
@@ -248,6 +251,10 @@ void Join::createAsyncTasks(boost::asio::io_service& ioService) {
         return;
     }*/
     
+    for (int i=0; i<requestedColumns.size(); i++) {
+        results.emplace_back(cntPartition);
+    }
+    
     pendingPartitioning = 2;
     partitionTable[0] = (uint64_t*)malloc(left->getResultsSize());
     partitionTable[1] = (uint64_t*)malloc(right->getResultsSize());
@@ -281,6 +288,7 @@ void Join::createAsyncTasks(boost::asio::io_service& ioService) {
 
 	// 각 튜플이 모두 다른 파티션에 들어간다고 했을떄, 한 튜플은 CACHE_LINE_SIZE*#COL 만큼의 메모리를 쓰게 된다. 이때, 한 태스크내에서의 모든 튜플들이 캐시라인에 들어가게 하는 튜플수가 maxLength
 	//unsigned maxLengthLeft = L2_SIZE/(CACHE_LINE_SIZE*leftInputData.size());
+/*
 	unsigned maxLengthLeft = L2_SIZE/(CACHE_LINE_SIZE*leftInputData.size());
 	//unsigned maxLengthRight = L2_SIZE/(CACHE_LINE_SIZE*rightInputData.size());
 	unsigned maxLengthRight = L2_SIZE/(CACHE_LINE_SIZE*rightInputData.size());
@@ -293,6 +301,7 @@ void Join::createAsyncTasks(boost::asio::io_service& ioService) {
 		taskLength[1] = maxLengthRight;
 		cntTaskRight = (right->resultSize+maxLengthRight-1)/maxLengthRight;	
 	}
+	*/
     if (left->resultSize/cntTaskLeft < minTuplesPerTask) {
         cntTaskLeft = (left->resultSize+minTuplesPerTask-1)/minTuplesPerTask;
         taskLength[0] = minTuplesPerTask;
@@ -521,12 +530,11 @@ void Join::subJoinTask(boost::asio::io_service* ioService, int taskIndex, vector
 #endif
     if (localResults[0].size() < 0) 
         goto sub_join_finish;
-    localMt.lock();
     for (unsigned i=0; i<requestedColumns.size(); i++)  {
-		results[i].addTuples(localResults[i].data(), localResults[i].size());
+		results[i].addTuples(taskIndex, localResults[i].data(), localResults[i].size());
     }
-    resultSize += localResults[0].size();
-    localMt.unlock();
+	__sync_fetch_and_add(&resultSize, localResults[0].size());
+//    resultSize += localResults[0].size();
 
 sub_join_finish:  
     int remainder = __sync_sub_and_fetch(&pendingSubjoin, 1);
@@ -544,11 +552,6 @@ sub_join_finish:
     
 }
 //---------------------------------------------------------------------------
-void SelfJoin::copy2Result(uint64_t id)
-// Copy to result
-{
-}
-//---------------------------------------------------------------------------
 bool SelfJoin::require(SelectInfo info)
 // Require a column and add it to results
 {
@@ -556,7 +559,7 @@ bool SelfJoin::require(SelectInfo info)
         return true;
     if(input->require(info)) {
         tmpResults.emplace_back();
-		results.emplace_back();
+		results.emplace_back(1);
         requiredIUs.emplace(info);
         return true;
     }
@@ -586,6 +589,12 @@ void SelfJoin::createAsyncTasks(boost::asio::io_service& ioService) {
 		cout << "SelfJoin("<< queryIndex << "," << operatorIndex <<"):: run task" << endl;
 #endif
 //        cout << "SelfJoin::Task" << endl;
+
+        if (input->resultSize == 0) {
+            finishAsyncRun(ioService, true);
+            return 0;
+        }
+
 		auto& inputData=input->getResults();
 
 		for (auto& iu : requiredIUs) {
@@ -620,7 +629,7 @@ void SelfJoin::createAsyncTasks(boost::asio::io_service& ioService) {
 			}
 		}
 		for (int i=0; i<tmpResults.size(); i++) {
-			results[i].addTuples(tmpResults[i].data(), tmpResults[i].size());
+			results[i].addTuples(0, tmpResults[i].data(), tmpResults[i].size());
 		}
         finishAsyncRun(ioService, true);
     });        
@@ -652,7 +661,15 @@ void Checksum::createAsyncTasks(boost::asio::io_service& ioService) {
 #ifdef VERBOSE
 		cout << "Checksum("<< queryIndex << "," << operatorIndex <<"):: run task" << endl;
 #endif
-		auto& results=input->getResults();
+        if (input->resultSize == 0) {
+            for (auto& sInfo : colInfo) {
+                checkSums.push_back(0);
+            }
+            finishAsyncRun(ioService, false);
+            return;
+        }
+		
+        auto& results=input->getResults();
 
 		for (auto& sInfo : colInfo) {
 			auto colId=input->resolve(sInfo);

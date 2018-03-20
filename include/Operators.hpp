@@ -11,7 +11,6 @@
 #include <boost/bind.hpp>
 #include <boost/thread/thread.hpp>
 #include <mutex>
-#include "tbb/concurrent_unordered_map.h"
 #include "Relation.hpp"
 #include "Parser.hpp"
 #include "Config.hpp"
@@ -42,7 +41,7 @@ protected:
     /// The tmp results
     std::vector<std::vector<uint64_t>> tmpResults;
     /// mutex for local ops to global
-    std::mutex localMt;
+//    std::mutex localMt;
     /// if 0, all asyncrunning input oeraotr finish.
     int pendingAsyncOperator=-1;
     virtual void finishAsyncRun(boost::asio::io_service& ioService, bool startParentAsync=false); 
@@ -82,6 +81,8 @@ protected:
     Relation& relation;
     /// The name of the relation in the query
     unsigned relationBinding;
+    /// required info
+    std::vector<SelectInfo> infos;
 
 public:
     /// The constructor
