@@ -6,5 +6,5 @@ cd $DIR
 mkdir -p build/release
 cd build/release
 cmake -DCMAKE_BUILD_TYPE=Release -DFORCE_TESTS=OFF ../..
-##cmake -DCMAKE_BUILD_TYPE=Debug -DFORCE_TESTS=OFF ../..
+#cmake -DCMAKE_BUILD_TYPE=Debug -DFORCE_TESTS=OFF ../..
 make -j8

@@ -55,8 +55,9 @@ void Scan::asyncRun(boost::asio::io_service& ioService) {
     pendingAsyncOperator = 1;
     for (int i=0; i<infos.size(); i++) {
         results[i].addTuples(0, relation.columns[infos[i].colId], relation.size);
+        results[i].fix();
     }
-    resultSize=relation.size;
+    resultSize=relation.size; 
     finishAsyncRun(ioService, true);
 }
 //---------------------------------------------------------------------------
@@ -154,6 +155,9 @@ void FilterScan::filterTask(boost::asio::io_service* ioService, int taskIndex, u
 
     int remainder = __sync_sub_and_fetch(&pendingTask, 1);
     if (remainder == 0) {
+        for (unsigned cId=0;cId<inputData.size();++cId) {
+            results[cId].fix();
+        }
         finishAsyncRun(*ioService, true);
     }
 }
@@ -542,6 +546,9 @@ sub_join_finish:
 #ifdef VERBOSE
         cout << "Join("<< queryIndex << "," << operatorIndex <<") join finish. result size: " << resultSize << endl;
 #endif
+        for (unsigned cId=0;cId<requestedColumns.size();++cId) {
+            results[cId].fix();
+        }
         finishAsyncRun(*ioService, true); 
         if (cntPartition != 1) { // if 1, no partitioning
             free(partitionTable[0]);
@@ -609,6 +616,9 @@ void SelfJoin::selfJoinTask(boost::asio::io_service* ioService, int taskIndex, u
 
     int remainder = __sync_sub_and_fetch(&pendingTask, 1);
     if (remainder == 0) {
+        for (unsigned cId=0;cId<copyData.size();++cId) {
+            results[cId].fix();
+        }
         finishAsyncRun(*ioService, true);
     }
 }
