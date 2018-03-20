@@ -558,8 +558,6 @@ bool SelfJoin::require(SelectInfo info)
     if (requiredIUs.count(info))
         return true;
     if(input->require(info)) {
-        tmpResults.emplace_back();
-		results.emplace_back(1);
         requiredIUs.emplace(info);
         return true;
     }
@@ -576,64 +574,89 @@ void SelfJoin::asyncRun(boost::asio::io_service& ioService) {
     __sync_synchronize();
     input->asyncRun(ioService);
 }
+//---------------------------------------------------------------------------
+void SelfJoin::selfJoinTask(boost::asio::io_service* ioService, int taskIndex, unsigned start, unsigned length) {
+    auto& inputData=input->getResults();
+    vector<vector<uint64_t>>& localResults = tmpResults[taskIndex];
+    auto leftColId=input->resolve(pInfo.left);
+    auto rightColId=input->resolve(pInfo.right);
 
+    auto leftColIt=inputData[leftColId].begin(start);
+    auto rightColIt=inputData[rightColId].begin(start);
+
+    vector<Column<uint64_t>::Iterator> colIt;
+    
+    for (unsigned i=0; i<copyData.size(); i++) {
+        colIt.push_back(copyData[i]->begin(start));
+    }
+    for (uint64_t i=start, limit=start+length;i<limit;++i) {
+        if (*leftColIt==*rightColIt) {
+            for (unsigned cId=0;cId<copyData.size();++cId) {
+                localResults[cId].push_back(*(colIt[cId]));
+            }
+        }
+        ++leftColIt;
+        ++rightColIt;
+        for (unsigned i=0; i<copyData.size(); i++) {
+            ++colIt[i];
+        }
+    }
+    //local results가 0일 경우??? ressult, tmp 초기화
+    for (int i=0; i<copyData.size(); i++) {
+        results[i].addTuples(taskIndex, localResults[i].data(), localResults[i].size());
+    }
+	__sync_fetch_and_add(&resultSize, localResults[0].size());
+
+    int remainder = __sync_sub_and_fetch(&pendingTask, 1);
+    if (remainder == 0) {
+        finishAsyncRun(*ioService, true);
+    }
+}
 //---------------------------------------------------------------------------
 void SelfJoin::createAsyncTasks(boost::asio::io_service& ioService) {
     assert (pendingAsyncOperator==0);
 #ifdef VERBOSE
     cout << "SelfJoin("<< queryIndex << "," << operatorIndex <<")::createAsyncTasks" << endl;
 #endif
-    // can be parallize
-    ioService.post([&]() {
-#ifdef VERBOSE
-		cout << "SelfJoin("<< queryIndex << "," << operatorIndex <<"):: run task" << endl;
-#endif
-//        cout << "SelfJoin::Task" << endl;
 
-        if (input->resultSize == 0) {
-            finishAsyncRun(ioService, true);
-            return 0;
-        }
-
-		auto& inputData=input->getResults();
-
-		for (auto& iu : requiredIUs) {
-			auto id=input->resolve(iu);
-			copyData.emplace_back(&inputData[id]);
-			select2ResultColId.emplace(iu,copyData.size()-1);
-		}
-
-		auto leftColId=input->resolve(pInfo.left);
-		auto rightColId=input->resolve(pInfo.right);
-
-		auto leftColIt=inputData[leftColId].begin(0);
-		auto rightColIt=inputData[rightColId].begin(0);
-
-		
-		vector<Column<uint64_t>::Iterator> colIt;
-		
-		for (unsigned i=0; i<copyData.size(); i++) {
-			colIt.push_back(copyData[i]->begin(0));
-		}
-		for (uint64_t i=0;i<input->resultSize;++i) {
-			if (*leftColIt==*rightColIt) {
-				for (unsigned cId=0;cId<copyData.size();++cId) {
-					tmpResults[cId].push_back(*(colIt[cId]));
-				}
-				++resultSize;
-			}
-			++leftColIt;
-			++rightColIt;
-			for (unsigned i=0; i<copyData.size(); i++) {
-				++colIt[i];
-			}
-		}
-		for (int i=0; i<tmpResults.size(); i++) {
-			results[i].addTuples(0, tmpResults[i].data(), tmpResults[i].size());
-		}
+    if (input->resultSize == 0) {
         finishAsyncRun(ioService, true);
-    });        
-            
+        return;
+    }
+    
+    auto& inputData=input->getResults();
+    int cntTask = THREAD_NUM;
+    unsigned taskLength = (input->resultSize+cntTask-1)/cntTask;
+    
+    for (auto& iu : requiredIUs) {
+        auto id=input->resolve(iu);
+        copyData.emplace_back(&inputData[id]);
+        select2ResultColId.emplace(iu,copyData.size()-1);
+		results.emplace_back(cntTask);
+    }
+
+    for (int i=0; i<cntTask; i++) {
+        tmpResults.emplace_back();
+        for (int j=0; j<copyData.size(); j++) {
+            tmpResults[i].emplace_back();
+        }
+    } 
+    
+    if (input->resultSize/cntTask < minTuplesPerTask) {
+        cntTask = (input->resultSize+minTuplesPerTask-1)/minTuplesPerTask;
+        taskLength = minTuplesPerTask;
+    }
+    
+    pendingTask = cntTask; 
+    __sync_synchronize();
+    unsigned length = taskLength;
+    for (int i=0; i<cntTask; i++) {
+        unsigned start = i*length;
+        if (i == cntTask-1 && input->resultSize%length) {
+            length = input->resultSize%length;
+        }
+        ioService.post(bind(&SelfJoin::selfJoinTask, this, &ioService, i, start, length)); 
+    }
 }
 //---------------------------------------------------------------------------
 void Checksum::asyncRun(boost::asio::io_service& ioService, int queryIndex) {
@@ -703,11 +726,11 @@ void Checksum::printAsyncInfo() {
 
 void SelfJoin::printAsyncInfo() {
 	input->printAsyncInfo();
+	cout << "pendingSelfJoin : " << pendingTask << endl;
 }
 void Join::printAsyncInfo() {
 	left->printAsyncInfo();
 	right->printAsyncInfo();
-	__sync_synchronize();
 	cout << "pendingMakingHistogram[0] : " << pendingMakingHistogram[0] << endl;
 	cout << "pendingMakingHistogram[1] : " << pendingMakingHistogram[1] << endl;
 	cout << "pendingScattering[0] : " << pendingScattering[0] << endl;

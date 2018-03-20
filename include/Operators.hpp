@@ -37,9 +37,9 @@ protected:
     std::unordered_map<SelectInfo,unsigned> select2ResultColId;
     /// The materialized results
     std::vector<Column<uint64_t>> results;
-	//std::vector<uint64_t*> resultColumns;
     /// The tmp results
     std::vector<std::vector<uint64_t>> tmpResults;
+	//std::vector<uint64_t*> resultColumns;
     /// mutex for local ops to global
 //    std::mutex localMt;
     /// if 0, all asyncrunning input oeraotr finish.
@@ -97,19 +97,20 @@ public:
 };
 //---------------------------------------------------------------------------
 class FilterScan : public Scan {
-    /// The tmp results
-    std::vector<std::vector<std::vector<uint64_t>>> tmpResults; // [task][col][tuple]
     /// The filter info
     std::vector<FilterInfo> filters;
     /// The input data
     std::vector<uint64_t*> inputData;
+    /// tmpResults
+	std::vector<std::vector<std::vector<uint64_t>>> tmpResults; // [partition][col][tuple]
     /// Apply filter
     bool applyFilter(uint64_t id,FilterInfo& f);
     /// Copy tuple to result
     void copy2Result(uint64_t id);
-
     /// for parallel
     int pendingTask = -1;
+
+    void filterTask(boost::asio::io_service* ioService, int taskIndex, unsigned start, unsigned length);
 public:
     /// The constructor
     FilterScan(Relation& r,std::vector<FilterInfo> filters) : Scan(r,filters[0].filterColumn.binding), filters(filters)  {};
@@ -122,7 +123,6 @@ public:
     /// only call it if pendingAsyncOperator=0, and can getResults()
     virtual void createAsyncTasks(boost::asio::io_service& ioService) override;
     /// create sync test
-    void filterTask(boost::asio::io_service* ioService, int taskIndex, unsigned start, unsigned length);
     virtual unsigned getResultsSize() override { return Operator::getResultsSize(); }
 	// Print async info
 	virtual void printAsyncInfo() override;
@@ -130,12 +130,12 @@ public:
 };
 //---------------------------------------------------------------------------
 class Join : public Operator {
-    /// tmpResults
-	std::vector<std::vector<std::vector<uint64_t>>> tmpResults; // [partition][col][tuple]
     /// The input operators
     std::shared_ptr<Operator> left, right;
     /// The join predicate info
     PredicateInfo pInfo;
+    /// tmpResults
+	std::vector<std::vector<std::vector<uint64_t>>> tmpResults; // [partition][col][tuple]
     /// Copy tuple to result
     void copy2Result(uint64_t leftId,uint64_t rightId);
     /// Create mapping for bindings
@@ -194,6 +194,8 @@ class SelfJoin : public Operator {
     std::shared_ptr<Operator> input;
     /// The join predicate info
     PredicateInfo pInfo;
+    /// tmpResults
+	std::vector<std::vector<std::vector<uint64_t>>> tmpResults; // [partition][col][tuple]
     /// Copy tuple to result
     void copy2Result(uint64_t id);
     /// The required IUs
@@ -201,6 +203,10 @@ class SelfJoin : public Operator {
 
     /// The input data that has to be copied
     std::vector<Column<uint64_t>*> copyData;
+    int pendingTask = -1;
+    unsigned minTuplesPerTask = 100;
+    
+    void selfJoinTask(boost::asio::io_service* ioService, int taskIndex, unsigned start, unsigned length);
 
 public:
     /// The constructor
