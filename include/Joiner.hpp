@@ -27,6 +27,7 @@ class Joiner {
     int nextQueryIndex = 0;
     std::vector<std::vector<uint64_t>> asyncResults; //checksums
     std::vector<std::shared_ptr<Checksum>> asyncJoins; 
+    std::vector<std::shared_ptr<Checksum>> tmp; 
     std::condition_variable cvAsync;
     std::mutex cvAsyncMt;
     

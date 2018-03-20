@@ -32,11 +32,11 @@ void Joiner::waitAsyncJoins() {
     unique_lock<mutex> lk(cvAsyncMt);
     if (pendingAsyncJoin > 0)  {
 #ifdef VERBOSE
-    cout << "Joiner::waitAsyncJoins wait" << endl;
+        cout << "Joiner::waitAsyncJoins wait" << endl;
 #endif
         cvAsync.wait(lk); 
 #ifdef VERBOSE
-    cout << "Joiner::waitAsyncJoins wakeup" << endl;
+        cout << "Joiner::waitAsyncJoins wakeup" << endl;
 #endif
     }
 }
@@ -59,6 +59,7 @@ vector<string> Joiner::getAsyncJoinResults() {
     cout << "Joiner::getAsnyJoinResults "<< nextQueryIndex-1 << " queries are processed." << endl;
 #endif
     asyncResults.clear();
+    tmp.insert(tmp.end(), asyncJoins.begin(), asyncJoins.end());
     asyncJoins.clear();
     nextQueryIndex = 0;
     
@@ -179,7 +180,7 @@ void Joiner::join(QueryInfo& query)
 
     std::shared_ptr<Checksum> checkSum = std::make_shared<Checksum>(*this, root, query.selections);
 #ifdef VERBOSE
-        checkSum->setOperatorIndex(opIdx++);
+    checkSum->setOperatorIndex(opIdx++);
 #endif
     root->setParent(checkSum);
 	__sync_fetch_and_add(&pendingAsyncJoin, 1);
@@ -187,7 +188,7 @@ void Joiner::join(QueryInfo& query)
 #ifdef VERBOSE
 	cout << "Joiner: Query runs asynchrounously: " << nextQueryIndex << endl; 
 #endif
+	asyncJoins.push_back(checkSum);
 	checkSum->asyncRun(ioService, nextQueryIndex++);
-	asyncJoins.push_back(std::move(checkSum));
 }
 //---------------------------------------------------------------------------

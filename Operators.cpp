@@ -13,6 +13,7 @@ using namespace std;
 void Operator::finishAsyncRun(boost::asio::io_service& ioService, bool startParentAsync) {
     if (auto p = parent.lock()) {
         int pending = __sync_sub_and_fetch(&p->pendingAsyncOperator, 1);
+        assert(pending>=0);
 #ifdef VERBOSE
     cout << "Operator("<< queryIndex << "," << operatorIndex <<")::finishAsyncRun parent's pending: " << pending << endl;
 #endif
@@ -52,7 +53,7 @@ void Scan::asyncRun(boost::asio::io_service& ioService) {
 #ifdef VERBOSE
     cout << "Scan("<< queryIndex << "," << operatorIndex <<")::asyncRun, Task" << endl;
 #endif
-    pendingAsyncOperator = 1;
+    pendingAsyncOperator = 0;
     for (int i=0; i<infos.size(); i++) {
         results[i].addTuples(0, relation.columns[infos[i].colId], relation.size);
         results[i].fix();
@@ -97,7 +98,7 @@ void FilterScan::asyncRun(boost::asio::io_service& ioService) {
 #ifdef VERBOSE
     cout << "FilterScan("<< queryIndex << "," << operatorIndex <<")::asyncRun" << endl;
 #endif
-    pendingAsyncOperator = 1;
+    pendingAsyncOperator = 0;
     __sync_synchronize();
     createAsyncTasks(ioService);  
 }
@@ -549,11 +550,11 @@ sub_join_finish:
         for (unsigned cId=0;cId<requestedColumns.size();++cId) {
             results[cId].fix();
         }
-        finishAsyncRun(*ioService, true); 
         if (cntPartition != 1) { // if 1, no partitioning
             free(partitionTable[0]);
             free(partitionTable[1]);
-        }
+        } //만약 finishAsyncRun하고 free하면, free하려는데 query가 다 끝나서 partitionTable[]이 없을 수 있다.
+        finishAsyncRun(*ioService, true); 
     }
     //일단은 그냥 left로 building하자. 나중에 최적화된 방법으로 ㄲ
     
@@ -682,48 +683,72 @@ void Checksum::asyncRun(boost::asio::io_service& ioService, int queryIndex) {
     input->asyncRun(ioService);
 //    cout << "Checksum::asyncRun" << endl;
 }
+//---------------------------------------------------------------------------
 
+void Checksum::checksumTask(boost::asio::io_service* ioService, int taskIndex, unsigned start, unsigned length) {
+    auto& inputData=input->getResults();
+     
+    int sumIndex = 0;
+    for (auto& sInfo : colInfo) {
+        auto colId = input->resolve(sInfo);
+        auto inputColIt = inputData[colId].begin(start);
+        uint64_t sum=0;
+        for (int i=0; i<length; i++,++inputColIt)
+            sum += *inputColIt;
+        __sync_fetch_and_add(&checkSums[sumIndex++], sum);
+    }
+    
+    int remainder = __sync_sub_and_fetch(&pendingTask, 1);
+    if (remainder == 0) {
+        finishAsyncRun(*ioService, false);
+    }
+     
+}
 //---------------------------------------------------------------------------
 void Checksum::createAsyncTasks(boost::asio::io_service& ioService) {
     assert (pendingAsyncOperator==0);
 #ifdef VERBOSE
     cout << "Checksum(" << queryIndex << "," << operatorIndex <<  ")::createAsyncTasks" << endl;
 #endif
-    // can be parallize
-    ioService.post([&]() {
-#ifdef VERBOSE
-		cout << "Checksum("<< queryIndex << "," << operatorIndex <<"):: run task" << endl;
-#endif
-        if (input->resultSize == 0) {
-            for (auto& sInfo : colInfo) {
-                checkSums.push_back(0);
-            }
-            finishAsyncRun(ioService, false);
-            return;
-        }
-		
-        auto& results=input->getResults();
-
-		for (auto& sInfo : colInfo) {
-			auto colId=input->resolve(sInfo);
-			auto resultColIt=results[colId].begin(0);
-			uint64_t sum=0;
-			resultSize=input->resultSize;
-			for (int i=0;i<input->resultSize;i++, ++resultColIt)
-				sum+=*resultColIt;
-			checkSums.push_back(sum);
-		}
+    for (auto& sInfo : colInfo) {
+        checkSums.push_back(0);
+    }
+    if (input->resultSize == 0) {
         finishAsyncRun(ioService, false);
-//        cout << "Checksum::Task" << endl;
-    });        
-            
+        return;
+    }
+    
+    int cntTask = THREAD_NUM;
+    unsigned taskLength = (input->resultSize+cntTask-1)/cntTask;
+    
+    if (input->resultSize/cntTask < minTuplesPerTask) {
+        cntTask = (input->resultSize+minTuplesPerTask-1)/minTuplesPerTask;
+        taskLength = minTuplesPerTask;
+    }
+#ifdef VERBOSE 
+    cout << "Checksum(" << queryIndex << "," << operatorIndex <<  ") cntTask: " << cntTask << " length: " << taskLength <<  endl;
+#endif
+    pendingTask = cntTask; 
+    __sync_synchronize();
+    unsigned length = taskLength;
+    for (int i=0; i<cntTask; i++) {
+        unsigned start = i*length;
+        if (i == cntTask-1 && input->resultSize%length) {
+            length = input->resultSize%length;
+        }
+        ioService.post(bind(&Checksum::checksumTask, this, &ioService, i, start, length)); 
+    }
 }
 void Checksum::finishAsyncRun(boost::asio::io_service& ioService, bool startParentAsync) {
     joiner.asyncResults[queryIndex] = std::move(checkSums);
     int pending = __sync_sub_and_fetch(&joiner.pendingAsyncJoin, 1);
+#ifdef VERBOSE
+    cout << "Checksum(" << queryIndex << "," << operatorIndex <<  ") finish query index: " << queryIndex << " rest quries: "<< pending << endl;
+#endif
+    assert(pending >= 0);
     if (pending == 0) {
 #ifdef VERBOSE
-        cout << "Checksum: finish query index: " << queryIndex << endl;
+        cout << "A query set is done. " << endl;
 #endif
         unique_lock<mutex> lk(joiner.cvAsyncMt); // guard for missing notification
         joiner.cvAsync.notify_one();
@@ -731,21 +756,22 @@ void Checksum::finishAsyncRun(boost::asio::io_service& ioService, bool startPare
 }
 //---------------------------------------------------------------------------
 void Checksum::printAsyncInfo() {
+	cout << "pendingChecksum : " << pendingTask << endl;
 	input->printAsyncInfo();
 }
 
 void SelfJoin::printAsyncInfo() {
-	input->printAsyncInfo();
 	cout << "pendingSelfJoin : " << pendingTask << endl;
+	input->printAsyncInfo();
 }
 void Join::printAsyncInfo() {
-	left->printAsyncInfo();
-	right->printAsyncInfo();
-	cout << "pendingMakingHistogram[0] : " << pendingMakingHistogram[0] << endl;
-	cout << "pendingMakingHistogram[1] : " << pendingMakingHistogram[1] << endl;
+	cout << "pendingSubjoin : " << pendingSubjoin << endl;
 	cout << "pendingScattering[0] : " << pendingScattering[0] << endl;
 	cout << "pendingScattering[1] : " << pendingScattering[1] << endl;
-	cout << "pendingSubjoin : " << pendingSubjoin << endl;
+	cout << "pendingMakingHistogram[0] : " << pendingMakingHistogram[0] << endl;
+	cout << "pendingMakingHistogram[1] : " << pendingMakingHistogram[1] << endl;
+	left->printAsyncInfo();
+	right->printAsyncInfo();
 	
 }
 void FilterScan::printAsyncInfo() {

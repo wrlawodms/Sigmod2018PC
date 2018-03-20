@@ -205,7 +205,6 @@ class SelfJoin : public Operator {
     std::vector<Column<uint64_t>*> copyData;
     int pendingTask = -1;
     unsigned minTuplesPerTask = 100;
-    
     void selfJoinTask(boost::asio::io_service* ioService, int taskIndex, unsigned start, unsigned length);
 
 public:
@@ -229,6 +228,10 @@ class Checksum : public Operator {
     std::vector<SelectInfo> colInfo;
     /// Query Index
     int queryIndex;
+    
+    int pendingTask = -1;
+    unsigned minTuplesPerTask = 100;
+    void checksumTask(boost::asio::io_service* ioService, int taskIndex, unsigned start, unsigned length);
 
 public:
     std::vector<uint64_t> checkSums;

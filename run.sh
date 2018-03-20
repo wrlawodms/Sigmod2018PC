@@ -7,7 +7,7 @@ if [ "$1" == "-g" ]; then
 elif [ "$1" == "-vc" ]; then
 	valgrind --tool=cachegrind ${DIR}/build/release/Driver
 elif [ "$1" == "-vm" ]; then
-	valgrind --leak-check=full -v  ${DIR}/build/release/Driver
+    valgrind --leak-check=full -v ${DIR}/build/release/Driver
 else
 	${DIR}/build/release/Driver
 fi

@@ -9,7 +9,7 @@ using namespace std;
 #ifdef MONITOR_ASYNC_JOIN
 	void monitorAsyncJoinThread(Joiner* joiner) {
 		while (true) {
-			sleep(1);
+			usleep(1000);
 			joiner->printAsyncJoinInfo();
 		}
 	}
