@@ -334,7 +334,7 @@ void Join::createAsyncTasks(boost::asio::io_service& ioService) {
         }
     }
     pendingMakingHistogram[0] = cntTaskLeft;
-    pendingMakingHistogram[1] = cntTaskRight;
+    pendingMakingHistogram[1*CACHE_LINE_SIZE] = cntTaskRight;
 
     __sync_synchronize();    
     // int length = limit/(taskNum);
@@ -384,7 +384,7 @@ void Join::histogramTask(boost::asio::io_service* ioService, int cntTask, int ta
     for (unsigned i=start,limit=start+length; i<limit; i++, ++it) {
         histograms[leftOrRight][taskIndex][RADIX_HASH(*it, cntPartition)]++; // cntPartition으로 나뉠 수 있도록하는 HASH
     }
-    int remainder = __sync_sub_and_fetch(&pendingMakingHistogram[leftOrRight], 1);
+    int remainder = __sync_sub_and_fetch(&pendingMakingHistogram[leftOrRight*CACHE_LINE_SIZE], 1);
     if (remainder == 0) { // gogo scattering
         for (int i=0; i<cntPartition; i++) {
             partitionLength[leftOrRight].push_back(0);
@@ -405,7 +405,7 @@ void Join::histogramTask(boost::asio::io_service* ioService, int cntTask, int ta
             }
             partAddress += cntTuples*cntColumns;
         }
-        pendingScattering[leftOrRight] = cntTask;
+        pendingScattering[leftOrRight*CACHE_LINE_SIZE] = cntTask;
         __sync_synchronize(); //for histograms
 #ifdef VERBOSE
     cout << "Join("<< queryIndex << "," << operatorIndex <<") " << (!leftOrRight?"left":"right") << " histogram tasks are done." << endl << "create scatteringTasks " <<endl;
@@ -472,7 +472,7 @@ void Join::scatteringTask(boost::asio::io_service* ioService, int taskIndex, int
         }
         insertOffs[hashResult]++;
     }
-    int remainder = __sync_sub_and_fetch(&pendingScattering[leftOrRight], 1);
+    int remainder = __sync_sub_and_fetch(&pendingScattering[leftOrRight*CACHE_LINE_SIZE], 1);
     if (remainder == 0) { // gogo scattering
         int remPart = __sync_sub_and_fetch(&pendingPartitioning, 1);
         if (remPart == 0) {
@@ -769,9 +769,9 @@ void SelfJoin::printAsyncInfo() {
 void Join::printAsyncInfo() {
 	cout << "pendingSubjoin : " << pendingSubjoin << endl;
 	cout << "pendingScattering[0] : " << pendingScattering[0] << endl;
-	cout << "pendingScattering[1] : " << pendingScattering[1] << endl;
+	cout << "pendingScattering[1] : " << pendingScattering[1*CACHE_LINE_SIZE] << endl;
 	cout << "pendingMakingHistogram[0] : " << pendingMakingHistogram[0] << endl;
-	cout << "pendingMakingHistogram[1] : " << pendingMakingHistogram[1] << endl;
+	cout << "pendingMakingHistogram[1] : " << pendingMakingHistogram[1*CACHE_LINE_SIZE] << endl;
 	left->printAsyncInfo();
 	right->printAsyncInfo();
 	

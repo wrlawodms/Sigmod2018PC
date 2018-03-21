@@ -141,10 +141,13 @@ class Join : public Operator {
     /// Create mapping for bindings
     void createMappingForBindings();
 
-    int pendingMakingHistogram[2] = {-1,-1};
-    int pendingScattering[2] = {-1,-1};
+    char pad1[CACHE_LINE_SIZE];
+    int pendingMakingHistogram[2*CACHE_LINE_SIZE]; // = { -1, -1};
+    int pendingScattering[2*CACHE_LINE_SIZE];//  = {-1,-1};
     int pendingPartitioning = -1;
+    char pad2[CACHE_LINE_SIZE];
     int pendingSubjoin = -1;
+    char pad3[CACHE_LINE_SIZE];
 
     // sequentially aloocated address for partitions, will be freed after materializing the result
     uint64_t* partitionTable[2];
