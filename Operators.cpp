@@ -261,8 +261,10 @@ void Join::createAsyncTasks(boost::asio::io_service& ioService) {
     }
     
     pendingPartitioning = 2;
-    partitionTable[0] = (uint64_t*)malloc(left->getResultsSize());
-    partitionTable[1] = (uint64_t*)malloc(right->getResultsSize());
+//    partitionTable[0] = (uint64_t*)malloc(left->getResultsSize());
+//    partitionTable[1] = (uint64_t*)malloc(right->getResultsSize());
+    partitionTable[0] = (uint64_t*)aligned_alloc(CACHE_LINE_SIZE, left->getResultsSize());
+    partitionTable[1] = (uint64_t*)aligned_alloc(CACHE_LINE_SIZE, right->getResultsSize());
     
     
     for (unsigned i=0; i<cntPartition; i++) {
