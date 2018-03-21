@@ -53,7 +53,7 @@ int main(int argc, char* argv[]) {
             continue;
         }
         i.parseQuery(line);
-        joiner.join(i);
+        joiner.createAsyncQueryTask(i);
         //cout << joiner.join(i);
     }
 //    cerr << sum;

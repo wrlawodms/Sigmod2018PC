@@ -34,6 +34,8 @@ class Joiner {
     
     public:
     Joiner(int threadNum) : work(ioService) {
+        asyncResults.reserve(100);
+        asyncJoins.reserve(100);
         for (int i=0; i<threadNum; i++) {
             threadPool.create_thread(
                 boost::bind(&boost::asio::io_service::run, &ioService)
@@ -47,7 +49,7 @@ class Joiner {
     /// Get relation
     Relation& getRelation(unsigned id);
     /// Joins a given set of relations
-    void join(QueryInfo& i);
+    void join(QueryInfo& i, int queryIndex);
     /// wait for async joins
     void waitAsyncJoins();
     /// return parsed asyncResults 
@@ -55,6 +57,7 @@ class Joiner {
 	/// print asyncJoin infos
 	void printAsyncJoinInfo();
 
+    void createAsyncQueryTask(QueryInfo& query);
     ~Joiner() {
         ioService.stop();
         threadPool.join_all();

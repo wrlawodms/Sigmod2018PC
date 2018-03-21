@@ -106,7 +106,7 @@ static QueryGraphProvides analyzeInputOfJoin(set<unsigned>& usedRelations,Select
     return QueryGraphProvides::None;
 }
 //---------------------------------------------------------------------------
-void Joiner::join(QueryInfo& query)
+void Joiner::join(QueryInfo& query, int queryIndex)
 // Executes a join query
 {
     //cerr << query.dumpText() << endl;
@@ -116,6 +116,7 @@ void Joiner::join(QueryInfo& query)
     auto& firstJoin=query.predicates[0];
     auto left=addScan(usedRelations,firstJoin.left,query);
     auto right=addScan(usedRelations,firstJoin.right,query);
+    
     shared_ptr<Operator> root=make_shared<Join>(left, right, firstJoin);
 #ifdef VERBOSE
     unsigned opIdx = 0;
@@ -184,12 +185,17 @@ void Joiner::join(QueryInfo& query)
     checkSum->setOperatorIndex(opIdx++);
 #endif
     root->setParent(checkSum);
-	__sync_fetch_and_add(&pendingAsyncJoin, 1);
-	asyncResults.emplace_back();
 #ifdef VERBOSE
-	cout << "Joiner: Query runs asynchrounously: " << nextQueryIndex << endl; 
+	cout << "Joiner: Query runs asynchrounously: " << queryIndex << endl; 
 #endif
-	asyncJoins.push_back(checkSum);
-	checkSum->asyncRun(ioService, nextQueryIndex++);
+	asyncJoins[queryIndex] = checkSum;
+	checkSum->asyncRun(ioService, queryIndex); 
 }
 //---------------------------------------------------------------------------
+void Joiner::createAsyncQueryTask(QueryInfo& query)
+{
+	__sync_fetch_and_add(&pendingAsyncJoin, 1);
+    asyncJoins.emplace_back();
+    asyncResults.emplace_back();
+    ioService.post(bind(&Joiner::join, this, query, nextQueryIndex++)); 
+}
