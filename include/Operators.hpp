@@ -109,6 +109,8 @@ class FilterScan : public Scan {
     void copy2Result(uint64_t id);
     /// for parallel
     int pendingTask = -1;
+    
+    unsigned minTuplesPerTask = 100;
 
     void filterTask(boost::asio::io_service* ioService, int taskIndex, unsigned start, unsigned length);
 public:

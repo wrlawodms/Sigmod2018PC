@@ -110,13 +110,20 @@ void FilterScan::createAsyncTasks(boost::asio::io_service& ioService) {
 #endif  
     //const unsigned partitionSize = L2_SIZE/2;
     //const unsigned taskNum = CNT_PARTITIONS(relation.size*relation.columns.size()*8, partitionSize);
-	const unsigned taskNum = THREAD_NUM;
-    pendingTask = taskNum;
+	unsigned cntTask = THREAD_NUM;
+    unsigned taskLength = (relation.size+cntTask-1)/cntTask;
+    
+    if (relation.size/cntTask < minTuplesPerTask) {
+        cntTask = (relation.size+minTuplesPerTask-1)/minTuplesPerTask;
+        taskLength = minTuplesPerTask;
+    }
+    
+    pendingTask = cntTask;
     
     for (int i=0; i<inputData.size(); i++) {
-		results.emplace_back(taskNum);
+		results.emplace_back(cntTask);
     }
-	for (int i=0; i<taskNum; i++) {
+	for (int i=0; i<cntTask; i++) {
 		tmpResults.emplace_back();
 		for (int j=0; j<inputData.size(); j++) {
 			tmpResults[i].emplace_back();
@@ -125,10 +132,10 @@ void FilterScan::createAsyncTasks(boost::asio::io_service& ioService) {
 	
     __sync_synchronize(); 
     // unsigned length = partitionSize/(relation.columns.size()*8); 
-    unsigned length = (relation.size+taskNum-1)/taskNum;
-    for (unsigned i=0; i<taskNum; i++) {
+    unsigned length = taskLength;
+    for (unsigned i=0; i<cntTask; i++) {
         unsigned start = i*length;
-        if (i == taskNum-1 && relation.size%length) {
+        if (i == cntTask-1 && relation.size%length) {
             length = relation.size%length;
         }
         ioService.post(bind(&FilterScan::filterTask, this, &ioService, i, start, length)); 
@@ -137,6 +144,7 @@ void FilterScan::createAsyncTasks(boost::asio::io_service& ioService) {
 //---------------------------------------------------------------------------
 void FilterScan::filterTask(boost::asio::io_service* ioService, int taskIndex, unsigned start, unsigned length) {
     vector<vector<uint64_t>>& localResults = tmpResults[taskIndex];
+    localResults.reserve(length);
     for (unsigned i=start;i<start+length;++i) {
         bool pass=true;
         for (auto& f : filters) {
@@ -279,6 +287,7 @@ void Join::createAsyncTasks(boost::asio::io_service& ioService) {
 		tmpResults.emplace_back();
 		for (unsigned j=0; j<requestedColumns.size(); j++) {
 			tmpResults[i].emplace_back();
+//            tmpResults[i][tmpResults[i].size()-1].reserve(right->resultSize/cntPartition);
 		}
     }
     
@@ -647,6 +656,7 @@ void SelfJoin::createAsyncTasks(boost::asio::io_service& ioService) {
         select2ResultColId.emplace(iu,copyData.size()-1);
 		results.emplace_back(cntTask);
     }
+
 
     for (int i=0; i<cntTask; i++) {
         tmpResults.emplace_back();

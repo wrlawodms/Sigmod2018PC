@@ -111,7 +111,6 @@ void Joiner::join(QueryInfo& query)
 {
     //cerr << query.dumpText() << endl;
     set<unsigned> usedRelations;
-
     // We always start with the first join predicate and append the other joins to it (--> left-deep join trees)
     // You might want to choose a smarter join ordering ...
     auto& firstJoin=query.predicates[0];

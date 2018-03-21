@@ -63,8 +63,9 @@ void Relation::loadRelation(const char* fileName)
         cerr << "fstat\n";
 
     auto length=sb.st_size;
-
+    
     char* addr=static_cast<char*>(mmap(nullptr,length,PROT_READ,MAP_PRIVATE,fd,0u));
+    //madvise(addr, length, MADV_SEQUENTIAL);
     if (addr==MAP_FAILED) {
         cerr << "cannot mmap " << fileName << " of length " << length << endl;
         throw;
