@@ -1,0 +1,30 @@
+# started on Tue Mar 20 22:37:43 2018
+
+
+ Performance counter stats for process id '5610':
+
+   630,953,216,773      cycles                                                        (12.81%)
+   360,852,523,192      instructions              #    0.57  insns per cycle          (17.38%)
+     1,496,313,323      cache-misses              #   38.909 % of all cache refs      (20.90%)
+     3,845,680,751      cache-references                                              (20.85%)
+     8,899,367,170      L1-dcache-load-misses     #    7.56% of all L1-dcache hits    (19.89%)
+   117,756,844,512      L1-dcache-loads                                               (10.60%)
+    34,875,275,606      L1-dcache-stores                                              (10.26%)
+       133,777,900      L1-icache-load-misses                                         (10.36%)
+       734,412,482      LLC-load-misses           #   30.22% of all LL-cache hits     (11.38%)
+     2,430,044,287      LLC-loads                                                     (13.79%)
+       893,801,514      LLC-store-misses                                              (9.13%)
+     1,858,105,182      LLC-stores                                                    (9.09%)
+       433,027,910      dTLB-load-misses          #    0.37% of all dTLB cache hits   (12.76%)
+   117,700,144,641      dTLB-loads                                                    (10.73%)
+       614,936,681      dTLB-store-misses                                             (10.88%)
+    35,686,747,943      dTLB-stores                                                   (9.99%)
+        33,337,236      iTLB-load-misses          #  513.61% of all iTLB cache hits   (9.80%)
+         6,490,826      iTLB-loads                                                    (10.19%)
+       358,279,022      node-load-misses                                              (13.09%)
+       697,647,396      node-loads                                                    (16.22%)
+       276,657,779      node-store-misses                                             (9.06%)
+       873,032,541      node-stores                                                   (9.09%)
+
+      25.192846160 seconds time elapsed
+

@@ -58,8 +58,10 @@ vector<string> Joiner::getAsyncJoinResults() {
 #ifdef VERBOSE
     cout << "Joiner::getAsnyJoinResults "<< nextQueryIndex-1 << " queries are processed." << endl;
 #endif
+
     asyncResults.clear();
-    tmp.insert(tmp.end(), asyncJoins.begin(), asyncJoins.end());
+//    tmp.insert(tmp.end(), asyncJoins.begin(), asyncJoins.end()); 
+    ioService.post(bind([](vector<shared_ptr<Checksum>> ops){ }, asyncJoins)); //gc, asynchronous discount shared pointer and release
     asyncJoins.clear();
     nextQueryIndex = 0;
     
