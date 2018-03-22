@@ -37,8 +37,6 @@ protected:
     std::unordered_map<SelectInfo,unsigned> select2ResultColId;
     /// The materialized results
     std::vector<Column<uint64_t>> results;
-    /// The tmp results
-    std::vector<std::vector<uint64_t>> tmpResults;
 	//std::vector<uint64_t*> resultColumns;
     /// mutex for local ops to global
 //    std::mutex localMt;
