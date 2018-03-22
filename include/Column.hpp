@@ -8,8 +8,8 @@ using namespace std;
 template <typename T> 
 class Column {
 	vector<T*> tuples;
-	vector<unsigned> baseOffset;
 	vector<unsigned> tupleLength;
+	vector<unsigned> baseOffset;
 	bool fixed = false;
 
 public:
@@ -49,9 +49,9 @@ public:
      }
 	
 	class Iterator {
-		Column<T>& col;
 		int localIndex;
 		int localOffset; 
+		Column<T> col;
 
 	public:
 		Iterator(Column<T>& col, int start) : col(col) {

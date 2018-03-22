@@ -144,7 +144,9 @@ void FilterScan::createAsyncTasks(boost::asio::io_service& ioService) {
 //---------------------------------------------------------------------------
 void FilterScan::filterTask(boost::asio::io_service* ioService, int taskIndex, unsigned start, unsigned length) {
     vector<vector<uint64_t>>& localResults = tmpResults[taskIndex];
-    localResults.reserve(length);
+    for (unsigned cId=0;cId<inputData.size();++cId) {
+        localResults[cId].reserve(length);
+    }
     for (unsigned i=start;i<start+length;++i) {
         bool pass=true;
         for (auto& f : filters) {
