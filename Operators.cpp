@@ -271,6 +271,13 @@ void Join::createAsyncTasks(boost::asio::io_service& ioService) {
         results.emplace_back(cntPartition);
     }
     
+    // bloom filter
+    /*
+    bloomArgs.projected_element_count = left->resultSize/cntPartition/2;
+    bloomArgs.false_positive_probability = 0.1; 
+    assert(bloomArgs);
+    bloomArgs.compute_optimal_parameters();
+    */
     pendingPartitioning = 2;
 //    partitionTable[0] = (uint64_t*)malloc(left->getResultsSize());
 //    partitionTable[1] = (uint64_t*)malloc(right->getResultsSize());
@@ -512,7 +519,10 @@ void Join::subJoinTask(boost::asio::io_service* ioService, int taskIndex, vector
     uint64_t* rightKeyColumn = localRight[rightColId];
     std::set<unsigned> leftSet;
     std::set<unsigned> rightSet;
-    
+
+
+    //bloom_filter bloomFilter(bloomArgs);
+
     if (limitLeft == 0 || limitRight == 0) {
         goto sub_join_finish;
     }
@@ -528,6 +538,7 @@ void Join::subJoinTask(boost::asio::io_service* ioService, int taskIndex, vector
     hashTable.reserve(limitLeft*2);
     for (uint64_t i=0; i<limitLeft; i++) {
         hashTable.emplace(make_pair(leftKeyColumn[i],i));
+    //    bloomFilter.insert(leftKeyColumn[i]);
     }
     for (unsigned i=0; i<requestedColumns.size(); i++) {
         localResults.emplace_back();
@@ -535,6 +546,10 @@ void Join::subJoinTask(boost::asio::io_service* ioService, int taskIndex, vector
     // probing
     for (uint64_t i=0; i<limitRight; i++) {
         auto rightKey=rightKeyColumn[i];
+        /*
+        if (!bloomFilter.contains(rightKey))
+            continue;
+            */
         auto range=hashTable.equal_range(rightKey);
         for (auto iter=range.first;iter!=range.second;++iter) {
             unsigned relColId=0;
