@@ -394,7 +394,8 @@ void Join::histogramTask(boost::asio::io_service* ioService, int cntTask, int ta
         histograms[leftOrRight][taskIndex][RADIX_HASH(*it, cntPartition)]++; // cntPartition으로 나뉠 수 있도록하는 HASH
     }
     int remainder = __sync_sub_and_fetch(&pendingMakingHistogram[leftOrRight*CACHE_LINE_SIZE], 1);
-    if (remainder == 0) { // gogo scattering
+    
+    if (UNLIKELY(remainder == 0)) { // gogo scattering
         for (int i=0; i<cntPartition; i++) {
             partitionLength[leftOrRight].push_back(0);
             for (int j=0; j<cntTask; j++) {
@@ -470,7 +471,7 @@ void Join::scatteringTask(boost::asio::io_service* ioService, int taskIndex, int
         unsigned insertBase;
         unsigned insertOff = insertOffs[hashResult];
         
-        if (taskIndex == 0)
+        if (UNLIKELY(taskIndex == 0))
             insertBase = 0;
         else { 
             insertBase = histograms[leftOrRight][taskIndex-1][hashResult];
@@ -482,7 +483,7 @@ void Join::scatteringTask(boost::asio::io_service* ioService, int taskIndex, int
         insertOffs[hashResult]++;
     }
     int remainder = __sync_sub_and_fetch(&pendingScattering[leftOrRight*CACHE_LINE_SIZE], 1);
-    if (remainder == 0) { // gogo scattering
+    if (UNLIKELY(remainder == 0)) { // gogo scattering
         int remPart = __sync_sub_and_fetch(&pendingPartitioning, 1);
         if (remPart == 0) {
             pendingSubjoin = cntPartition;
@@ -554,7 +555,7 @@ void Join::subJoinTask(boost::asio::io_service* ioService, int taskIndex, vector
 
 sub_join_finish:  
     int remainder = __sync_sub_and_fetch(&pendingSubjoin, 1);
-    if (remainder == 0) {
+    if (UNLIKELY(remainder == 0)) {
 #ifdef VERBOSE
         cout << "Join("<< queryIndex << "," << operatorIndex <<") join finish. result size: " << resultSize << endl;
 #endif
@@ -627,7 +628,7 @@ void SelfJoin::selfJoinTask(boost::asio::io_service* ioService, int taskIndex, u
 	__sync_fetch_and_add(&resultSize, localResults[0].size());
 
     int remainder = __sync_sub_and_fetch(&pendingTask, 1);
-    if (remainder == 0) {
+    if (UNLIKELY(remainder == 0)) {
         for (unsigned cId=0;cId<copyData.size();++cId) {
             results[cId].fix();
         }
@@ -711,7 +712,7 @@ void Checksum::checksumTask(boost::asio::io_service* ioService, int taskIndex, u
     }
     
     int remainder = __sync_sub_and_fetch(&pendingTask, 1);
-    if (remainder == 0) {
+    if (UNLIKELY(remainder == 0)) {
         finishAsyncRun(*ioService, false);
     }
      

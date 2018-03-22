@@ -184,8 +184,8 @@ void Joiner::join(QueryInfo& query)
     checkSum->setOperatorIndex(opIdx++);
 #endif
     root->setParent(checkSum);
-	__sync_fetch_and_add(&pendingAsyncJoin, 1);
 	asyncResults.emplace_back();
+	__sync_fetch_and_add(&pendingAsyncJoin, 1);
 #ifdef VERBOSE
 	cout << "Joiner: Query runs asynchrounously: " << nextQueryIndex << endl; 
 #endif

@@ -1,6 +1,7 @@
 #pragma once
 #include <iostream>
 #include <vector>
+#include <Utils.hpp>
 
 using namespace std;
 
@@ -79,10 +80,10 @@ public:
 
 		inline Iterator& operator++() {
 			localOffset++;
-			while (localOffset >= col.tupleLength[localIndex]) {
+			while (UNLIKELY(localOffset >= col.tupleLength[localIndex])) {
                 localIndex++;
-                localOffset = 0;
-                if (localIndex == col.tupleLength.size()) {
+                localOffset = 0; 
+                if (UNLIKELY(localIndex == col.tupleLength.size())) {
                     break;
                 }
 			}
