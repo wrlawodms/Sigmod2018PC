@@ -48,7 +48,7 @@ public:
      }
 	
 	class Iterator {
-		Column<T>& col;
+		Column<T> col;
 		int localIndex;
 		int localOffset; 
 
