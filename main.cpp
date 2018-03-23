@@ -3,6 +3,9 @@
 #include "Joiner.hpp"
 #include "Parser.hpp"
 #include "Config.hpp"
+#ifdef ANALYZE
+#include "Timer.hpp"
+#endif
 
 using namespace std;
 
@@ -20,10 +23,16 @@ int main(int argc, char* argv[]) {
     Joiner joiner(THREAD_NUM);
     // Read join relations
     string line;
+#ifdef ANALYZE
+    Timer t = startTimer();
+#endif
     while (getline(cin, line)) {
         if (line == "Done") break;
         joiner.addRelation(line.c_str());
     }
+#ifdef ANALYZE
+    cerr << "Prepare Time : " << endTimer(t) << endl;
+#endif
     //chrono::steady_clock::time_point begin = chrono::steady_clock::now();
 
 /*    
@@ -43,6 +52,9 @@ int main(int argc, char* argv[]) {
 #ifdef MONITOR_ASYNC_JOIN
 	thread monitor(monitorAsyncJoinThread, &joiner);
 #endif
+#ifdef ANALYZE
+    t = startTimer();
+#endif
     QueryInfo i;
     while (getline(cin, line)) {
         //if (line == "F") continue; // End of a batch
@@ -58,5 +70,24 @@ int main(int argc, char* argv[]) {
         //cout << joiner.join(i);
     }
     //cerr << sum;
+#ifdef ANALYZE
+    extern uint64_t totFilterScan;
+    extern uint64_t totJoin;
+    extern uint64_t totSelfJoin;
+    extern uint64_t totChecksum;
+#define PRINT(X) do{\
+    fprintf(stderr, "%20s : %20lu\n", #X, X);\
+}while(0)
+    uint64_t tot = totFilterScan + totJoin + totSelfJoin + totChecksum;
+    PRINT(totFilterScan);
+    PRINT(totJoin);
+    PRINT(totSelfJoin);
+    PRINT(totChecksum);
+    PRINT(totFilterScan);
+    cerr << "Total : "<< tot << endl;
+#endif
+#ifdef ANALYZE
+    cerr << "Processing Time : " << endTimer(t) << endl;
+#endif
     return 0;
 }
