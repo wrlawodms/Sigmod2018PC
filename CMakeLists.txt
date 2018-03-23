@@ -44,5 +44,5 @@ add_executable(harness harness.cpp)
 ADD_CUSTOM_TARGET(link_target ALL
   COMMAND ${CMAKE_COMMAND} -E create_symlink ${CMAKE_CURRENT_SOURCE_DIR}/workloads
   ${CMAKE_CURRENT_BINARY_DIR}/workloads)
-#add_definitions(-DVERBOSE)
 #add_definitions(-DMONITOR_ASYNC_JOIN)
+#add_definitions(-DVERBOSE)

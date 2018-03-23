@@ -158,6 +158,7 @@ class Join : public Operator {
     uint64_t cntPartition;
 
     uint64_t taskLength[2];
+    uint64_t taskRest[2];
     const unsigned minTuplesPerTask = 200; // minimum part table size
 
     std::vector<std::vector<uint64_t*>> partition[2]; // just pointing partitionTable[], it is built after histogram, 각 파티션별 컬럼들의 위치를 포인팅  [LR][partition][column][tuple] P|C1sC2sC3s|P|C1sC2sC3s|...
