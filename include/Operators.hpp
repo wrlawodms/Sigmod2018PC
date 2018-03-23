@@ -15,6 +15,7 @@
 #include "Parser.hpp"
 #include "Config.hpp"
 #include "Column.hpp"
+#include "bloom_filter.hpp"
 //#include "Joiner.hpp"
 
 class Joiner;
@@ -64,7 +65,7 @@ public:
     /// Get  materialized results
     virtual std::vector<Column<uint64_t>>& getResults();
     /// Get materialized results size in bytes
-    virtual unsigned getResultsSize();
+    virtual uint64_t getResultsSize();
 	// Print async info
 	virtual void printAsyncInfo() = 0;
     /// The result size
@@ -89,7 +90,7 @@ public:
     bool require(SelectInfo info) override;
     /// AsyncRun
     virtual void asyncRun(boost::asio::io_service& ioService) override;
-    virtual unsigned getResultsSize() override;
+    virtual uint64_t getResultsSize() override;
 	// Print async info
 	virtual void printAsyncInfo() override;
 };
@@ -110,7 +111,7 @@ class FilterScan : public Scan {
     
     unsigned minTuplesPerTask = 100;
 
-    void filterTask(boost::asio::io_service* ioService, int taskIndex, unsigned start, unsigned length);
+    void filterTask(boost::asio::io_service* ioService, int taskIndex, uint64_t start, uint64_t length);
 public:
     /// The constructor
     FilterScan(Relation& r,std::vector<FilterInfo> filters) : Scan(r,filters[0].filterColumn.binding), filters(filters)  {};
@@ -123,13 +124,15 @@ public:
     /// only call it if pendingAsyncOperator=0, and can getResults()
     virtual void createAsyncTasks(boost::asio::io_service& ioService) override;
     /// create sync test
-    virtual unsigned getResultsSize() override { return Operator::getResultsSize(); }
+    virtual uint64_t getResultsSize() override { return Operator::getResultsSize(); }
 	// Print async info
 	virtual void printAsyncInfo() override;
     /// The result size
 };
 //---------------------------------------------------------------------------
 class Join : public Operator {
+    /// bloom filter 
+    bloom_parameters bloomArgs;
     /// The input operators
     std::shared_ptr<Operator> left, right;
     /// The join predicate info
@@ -151,20 +154,21 @@ class Join : public Operator {
 
     // sequentially aloocated address for partitions, will be freed after materializing the result
     uint64_t* partitionTable[2];
-    const unsigned partitionSize = L2_SIZE/16;
-    unsigned cntPartition;
+    const uint64_t partitionSize = L2_SIZE/16;
+    uint64_t cntPartition;
 
-    unsigned taskLength[2];
+    uint64_t taskLength[2];
+    uint64_t taskRest[2];
     const unsigned minTuplesPerTask = 200; // minimum part table size
 
     std::vector<std::vector<uint64_t*>> partition[2]; // just pointing partitionTable[], it is built after histogram, 각 파티션별 컬럼들의 위치를 포인팅  [LR][partition][column][tuple] P|C1sC2sC3s|P|C1sC2sC3s|...
-    std::vector<std::vector<unsigned>> histograms[2]; // [LR][taskIndex][partitionIndex], 각 파티션에 대한 벡터는 heap에 allocate되나? 안그럼 invalidate storㅇ이 일어날거 같은데
-    std::vector<unsigned> partitionLength[2]; // #tuples per each partition
+    std::vector<std::vector<uint64_t>> histograms[2]; // [LR][taskIndex][partitionIndex], 각 파티션에 대한 벡터는 heap에 allocate되나? 안그럼 invalidate storㅇ이 일어날거 같은데
+    std::vector<uint64_t> partitionLength[2]; // #tuples per each partition
 
-    void histogramTask(boost::asio::io_service* ioService, int cntTask, int taskIndex, int leftOrRight, unsigned start, unsigned length);
-    void scatteringTask(boost::asio::io_service* ioService, int taskIndex, int leftOrRight, unsigned start, unsigned length); 
+    void histogramTask(boost::asio::io_service* ioService, int cntTask, int taskIndex, int leftOrRight, uint64_t start, uint64_t length);
+    void scatteringTask(boost::asio::io_service* ioService, int taskIndex, int leftOrRight, uint64_t start, uint64_t length); 
     // for cache, partition must be allocated sequentially 
-    void subJoinTask(boost::asio::io_service* ioService, int taskIndex, std::vector<uint64_t*> left, unsigned leftLimit, std::vector<uint64_t*> right, unsigned rightLimit);  
+    void subJoinTask(boost::asio::io_service* ioService, int taskIndex, std::vector<uint64_t*> left, uint64_t leftLimit, std::vector<uint64_t*> right, uint64_t rightLimit);  
     
     /// Columns that have to be materialized
     std::unordered_set<SelectInfo> requestedColumns;
@@ -208,7 +212,7 @@ class SelfJoin : public Operator {
     std::vector<Column<uint64_t>*> copyData;
     int pendingTask = -1;
     unsigned minTuplesPerTask = 100;
-    void selfJoinTask(boost::asio::io_service* ioService, int taskIndex, unsigned start, unsigned length);
+    void selfJoinTask(boost::asio::io_service* ioService, int taskIndex, uint64_t start, uint64_t length);
 
 public:
     /// The constructor
@@ -234,7 +238,7 @@ class Checksum : public Operator {
     
     int pendingTask = -1;
     unsigned minTuplesPerTask = 100;
-    void checksumTask(boost::asio::io_service* ioService, int taskIndex, unsigned start, unsigned length);
+    void checksumTask(boost::asio::io_service* ioService, int taskIndex, uint64_t start, uint64_t length);
 
 public:
     std::vector<uint64_t> checkSums;

@@ -1,14 +1,15 @@
 #pragma once
 #include <iostream>
 #include <vector>
+#include <Utils.hpp>
 
 using namespace std;
 
 template <typename T> 
 class Column {
 	vector<T*> tuples;
-	vector<unsigned> tupleLength;
-	vector<unsigned> baseOffset;
+	vector<uint64_t> tupleLength;  //@TODO maybe unsgind is enough?
+	vector<uint64_t> baseOffset;
 	bool fixed = false;
 
 public:
@@ -21,7 +22,7 @@ public:
             tupleLength.emplace_back();
         }
 	}
-	void addTuples(unsigned pos, uint64_t* tuples, unsigned length) {
+	void addTuples(unsigned pos, uint64_t* tuples, uint64_t length) {
 		// if (length <= 0)
 		// 	return;
         this->tuples[pos] = tuples;
@@ -34,7 +35,7 @@ public:
 	}
 
     void fix() {
-        for (int i=1; i<baseOffset.size(); i++) {
+        for (unsigned i=1; i<baseOffset.size(); i++) {
             baseOffset[i] = baseOffset[i-1]+tupleLength[i-1];
         }
         fixed = true;
@@ -42,18 +43,18 @@ public:
 
     class Iterator;
 
-	Iterator begin(int index) { 
+	Iterator begin(uint64_t index) { 
         assert (fixed);
         return Iterator(*this, index);
      }
 	
 	class Iterator {
-		int localIndex;
-		int localOffset; 
+		unsigned localIndex;
+		uint64_t localOffset; 
 		Column<T> col;
 
 	public:
-		Iterator(Column<T>& col, int start) : col(col) {
+		Iterator(Column<T>& col, uint64_t start) : col(col) {
             if (col.tuples.size() == 0)
                 return;
 			auto it = lower_bound(col.baseOffset.begin(), col.baseOffset.end(),  start);
@@ -79,10 +80,10 @@ public:
 
 		inline Iterator& operator++() {
 			localOffset++;
-			while (localOffset >= col.tupleLength[localIndex]) {
+			while (UNLIKELY(localOffset >= col.tupleLength[localIndex])) {
                 localIndex++;
-                localOffset = 0;
-                if (localIndex == col.tupleLength.size()) {
+                localOffset = 0; 
+                if (UNLIKELY(localIndex == col.tupleLength.size())) {
                     break;
                 }
 			}

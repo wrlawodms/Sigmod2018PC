@@ -25,7 +25,8 @@ int main(int argc, char* argv[]) {
         joiner.addRelation(line.c_str());
     }
     //chrono::steady_clock::time_point begin = chrono::steady_clock::now();
-    /*
+
+/*    
     unsigned sum;
     for (auto& rel : joiner.relations) {
         for(uint64_t* col : rel.columns) {
@@ -35,7 +36,7 @@ int main(int argc, char* argv[]) {
             }
         }
     }
-    */
+  */  
     // Preparation phase (not timed)
     // Build histograms, indexes,...
     //
@@ -56,6 +57,6 @@ int main(int argc, char* argv[]) {
         joiner.createAsyncQueryTask(i);
         //cout << joiner.join(i);
     }
-//    cerr << sum;
+    //cerr << sum;
     return 0;
 }
