@@ -17,6 +17,7 @@ public:
     uint64_t size;
     /// The join column containing the keys
     std::vector<uint64_t*> columns;
+    std::vector<std::vector<uint64_t*>> sorted;
 
     /// Stores a relation into a file (binary)
     void storeRelation(const std::string& fileName);

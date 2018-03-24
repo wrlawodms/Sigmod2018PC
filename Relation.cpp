@@ -3,6 +3,8 @@
 #include <fstream>
 #include <sys/mman.h>
 #include <sys/stat.h>
+#include <algorithm>
+#include "Config.hpp"
 #include "Relation.hpp"
 //---------------------------------------------------------------------------
 using namespace std;
@@ -83,6 +85,32 @@ void Relation::loadRelation(const char* fileName)
     for (unsigned i=0;i<numColumns;++i) {
         this->columns.push_back(reinterpret_cast<uint64_t*>(addr));
         addr+=size*sizeof(uint64_t);
+    }
+
+    struct Comparer{
+        bool operator()(const pair<uint64_t, uint64_t> &a, pair<uint64_t, uint64_t> &b){
+            return a.first < b.first;
+        }
+    } comparer;
+    for (unsigned i=0;i<numColumns;++i) {
+        vector<pair<uint64_t,uint64_t>> idx;
+        //idx.reserve(size);
+        for (uint64_t j=0;j<size;++j){
+            idx.emplace_back(columns[i][j], j);
+        }
+        sort(idx.begin(), idx.end(), comparer); 
+        vector<uint64_t*> res;
+        //res.reserve(numColumns);
+        uint64_t *area = (uint64_t*)aligned_alloc(CACHE_LINE_SIZE, numColumns * size * sizeof(uint64_t));
+        for (unsigned j=0;j<numColumns;++j){
+            res.emplace_back(&area[j*size]);
+        }
+        for (unsigned j=0;j<numColumns;++j){
+            for (uint64_t k=0;k<size;k++){
+                res[j][k]=columns[j][idx[k].second];
+            }
+        }
+        sorted.emplace_back(res);
     }
 }
 //---------------------------------------------------------------------------

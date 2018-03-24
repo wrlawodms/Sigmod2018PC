@@ -89,7 +89,7 @@ bool FilterScan::require(SelectInfo info)
     assert(info.colId<relation.columns.size());
     if (select2ResultColId.find(info)==select2ResultColId.end()) {
         // Add to results
-        inputData.push_back(relation.columns[info.colId]);
+        inputData.push_back(relation.sorted[filters[0].filterColumn.colId][info.colId]+bound.first);
 //        tmpResults.emplace_back();
         unsigned colId=inputData.size()-1;
         select2ResultColId[info]=colId;
@@ -123,31 +123,70 @@ void FilterScan::asyncRun(boost::asio::io_service& ioService) {
 }
 
 //---------------------------------------------------------------------------
+pair<uint64_t, uint64_t> FilterScan::getBound() { // First location, Length
+    FilterInfo &f(filters[0]);
+    uint64_t *arr = relation.sorted[f.filterColumn.colId][f.filterColumn.colId];
+
+    if (f.comparison == FilterInfo::Equal){
+        auto bound = equal_range(arr,arr+relation.size, f.constant);
+        return pair<uint64_t,uint64_t>(bound.first-arr, bound.second-bound.first);
+    }
+    else if (f.comparison == FilterInfo::Less){
+        auto bound = lower_bound(arr,arr+relation.size, f.constant);
+        return pair<uint64_t,uint64_t>(0, bound-arr);
+    }
+    else{
+        auto bound = lower_bound(arr,arr+relation.size, f.constant+1);
+        return pair<uint64_t,uint64_t>(bound-arr, relation.size - (bound-arr));
+    }
+}
 void FilterScan::createAsyncTasks(boost::asio::io_service& ioService) {
     DECL_CNT;
 #ifdef VERBOSE
     cout << "FilterScan("<< queryIndex << "," << operatorIndex <<")::createAsyncTasks" << endl;
-#endif  
-    //const uint64_t partitionSize = L2_SIZE/2;
-    //const unsigned taskNum = CNT_PARTITIONS(relation.size*relation.columns.size()*8, partitionSize);
+#endif
     int cntTask = THREAD_NUM;
-    uint64_t taskLength = relation.size/cntTask;
-    uint64_t rest = relation.size%cntTask;
-    
-    if (taskLength < minTuplesPerTask) {
-        cntTask = relation.size/minTuplesPerTask;
-        if (cntTask == 0)
-            cntTask = 1;
-        taskLength = relation.size/cntTask;
-        rest = relation.size%cntTask;
-    }
-    
-    pendingTask = cntTask;
-    
     for (int i=0; i<inputData.size(); i++) {
 		results.emplace_back(cntTask);
         CNT;
     }
+    if (filters.size() == 1){
+        for (unsigned cId=0;cId<inputData.size();++cId) {
+            results[cId].addTuples(0, inputData[cId], bound.second);
+            CNT;
+        }
+        for (unsigned cId=0;cId<inputData.size();++cId) {
+            for (int i=1; i<cntTask; i++) {
+                results[cId].addTuples(i, NULL, 0);
+                CNT;
+            }
+        }
+        resultSize += bound.second;
+
+        for (unsigned cId=0;cId<inputData.size();++cId) {
+            results[cId].fix();
+            CNT;
+        }
+        finishAsyncRun(ioService, true);
+        CNT_FILTERSCAN;
+        return;
+    }
+    //const uint64_t partitionSize = L2_SIZE/2;
+    //const unsigned taskNum = CNT_PARTITIONS(relation.size*relation.columns.size()*8, partitionSize);
+    uint64_t relSize = bound.second;
+    uint64_t taskLength = relSize/cntTask;
+    uint64_t rest = relSize%cntTask;
+    
+    if (taskLength < minTuplesPerTask) {
+        cntTask = relSize/minTuplesPerTask;
+        if (cntTask == 0)
+            cntTask = 1;
+        taskLength = relSize/cntTask;
+        rest = relSize%cntTask;
+    }
+    
+    pendingTask = cntTask;
+    
 	for (int i=0; i<cntTask; i++) {
 		tmpResults.emplace_back();
 		for (int j=0; j<inputData.size(); j++) {
@@ -181,8 +220,8 @@ void FilterScan::filterTask(boost::asio::io_service* ioService, int taskIndex, u
     }*/
     for (uint64_t i=start;i<start+length;++i) {
         bool pass=true;
-        for (auto& f : filters) {
-            pass&=applyFilter(i,f);
+        for (unsigned j=1;j<filters.size();++j){
+            pass&=applyFilter(i,filters[j]);
             CNT;
         }
         if (pass) {
