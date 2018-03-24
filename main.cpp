@@ -1,5 +1,6 @@
 #include <iostream>
 #include <thread>
+#include <map>
 #include "Joiner.hpp"
 #include "Parser.hpp"
 #include "Config.hpp"
@@ -30,7 +31,7 @@ int main(int argc, char* argv[]) {
         if (line == "Done") break;
         joiner.addRelation(line.c_str());
     }
-    joiner.loadIndexs();
+    //joiner.loadIndexs();
 #ifdef ANALYZE
     cerr << "Prepare Time : " << endTimer(t) << endl;
 #endif
@@ -54,7 +55,20 @@ int main(int argc, char* argv[]) {
 	thread monitor(monitorAsyncJoinThread, &joiner);
 #endif
 #ifdef ANALYZE
+    struct SelectInfoComparer{
+        bool operator()(const SelectInfo &a, const SelectInfo &b){
+            return a.relId < b.relId || (a.relId == b.relId && a.colId < b.colId);
+        }
+    };
     t = startTimer();
+    map<unsigned, unsigned> numRelation;
+    map<unsigned, unsigned> numPredicate;
+    map<unsigned, unsigned> numFilter;
+    map<SelectInfo, unsigned, SelectInfoComparer> numFilterColumn;
+    map<SelectInfo, unsigned, SelectInfoComparer> numPredicateColumn;
+    map<unsigned, unsigned> numFilterPerRelation;
+    uint64_t numJoin = 0;
+    uint64_t numSelfJoin = 0;
 #endif
     QueryInfo i;
     while (getline(cin, line)) {
@@ -69,6 +83,27 @@ int main(int argc, char* argv[]) {
         i.parseQuery(line);
         joiner.createAsyncQueryTask(i);
         //cout << joiner.join(i);
+#ifdef ANALYZE
+        ++numRelation[i.relationIds.size()];
+        ++numPredicate[i.predicates.size()];
+        ++numFilter[i.filters.size()];
+        for (auto &p:i.predicates){
+            ++numPredicateColumn[p.left];
+            ++numPredicateColumn[p.right];
+        }
+        for (auto &f:i.filters){
+            ++numFilterColumn[f.filterColumn];
+        }
+        for (unsigned binding=0;binding<i.relationIds.size();++binding){
+            unsigned cnt=0;
+            for (auto &f:i.filters){
+                cnt+=(binding == f.filterColumn.binding);
+            }
+            ++numFilterPerRelation[cnt];
+        }
+        numJoin+=i.relationIds.size()-1;
+        numSelfJoin+=i.predicates.size()-(i.relationIds.size()-1);
+#endif
     }
     //cerr << sum;
 #ifdef ANALYZE
@@ -81,6 +116,7 @@ int main(int argc, char* argv[]) {
 #define PRINT(X) do{\
     fprintf(stderr, "%20s : %20lu\n", #X, X);\
 }while(0)
+    cerr << "Performance Info" << endl;
     uint64_t tot = totFilterScan + totJoin + totSelfJoin + totChecksum;
     PRINT(totFilterScan);
     PRINT(totJoin);
@@ -89,9 +125,30 @@ int main(int argc, char* argv[]) {
     PRINT(totUseIndex);
     PRINT(totNotUseIndex);
     cerr << "Total : "<< tot << endl;
-#endif
-#ifdef ANALYZE
     cerr << "Processing Time : " << endTimer(t) << endl;
+
+#define PRINT_MAP(X) do{\
+    fprintf(stderr, "%s={\n", #X);\
+    for (auto &el : (X)){\
+        fprintf(stderr, "  %lu : %5lu\n", el.first, el.second);\
+    }\
+    fprintf(stderr, "}\n", #X, X);\
+}while(0)
+#define PRINT_MAP_SELECTINFO(X) do{\
+    fprintf(stderr, "%s={\n", #X);\
+    for (auto &el : (X)){\
+        fprintf(stderr, "  R%lu.%lu : %5lu\n", el.first.relId, el.first.colId, el.second);\
+    }\
+    fprintf(stderr, "}\n", #X, X);\
+}while(0)
+    PRINT_MAP(numRelation);
+    PRINT_MAP(numPredicate);
+    PRINT_MAP(numFilter);
+    PRINT_MAP_SELECTINFO(numFilterColumn);
+    PRINT_MAP_SELECTINFO(numPredicateColumn);
+    PRINT_MAP(numFilterPerRelation);
+    PRINT(numJoin);
+    PRINT(numSelfJoin);
 #endif
     return 0;
 }
