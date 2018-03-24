@@ -6,6 +6,7 @@
 #include "Joiner.hpp"
 #include "Config.hpp"
 #include "Utils.hpp"
+#include <sys/mman.h>
 
 //---------------------------------------------------------------------------
 using namespace std;
@@ -368,7 +369,11 @@ void Join::createAsyncTasks(boost::asio::io_service& ioService) {
 //    partitionTable[1] = (uint64_t*)malloc(right->getResultsSize());
     partitionTable[0] = (uint64_t*)aligned_alloc(CACHE_LINE_SIZE, left->getResultsSize());
     partitionTable[1] = (uint64_t*)aligned_alloc(CACHE_LINE_SIZE, right->getResultsSize());
-    
+
+    if (left->getResultsSize() > 2*1024*1024) 
+        madvise(partitionTable[0], left->getResultsSize(), MADV_HUGEPAGE);    
+    if (right->getResultsSize() > 2*1024*1024) 
+        madvise(partitionTable[1], right->getResultsSize(), MADV_HUGEPAGE);    
     
     for (uint64_t i=0; i<cntPartition; i++) {
         partition[0].emplace_back();
