@@ -108,14 +108,27 @@ class FilterScan : public Scan {
     void copy2Result(uint64_t id);
     /// for parallel
     int pendingTask = -1;
+    bool useSorted = false;
     pair<uint64_t, uint64_t> bound;
+    std::vector<uint64_t*> columns;
     
     unsigned minTuplesPerTask = 100;
 
     void filterTask(boost::asio::io_service* ioService, int taskIndex, uint64_t start, uint64_t length);
 public:
     /// The constructor
-    FilterScan(Relation& r,std::vector<FilterInfo> filters) : Scan(r,filters[0].filterColumn.binding), filters(filters)  {bound = getBound();};
+    FilterScan(Relation& r,std::vector<FilterInfo> filters) : Scan(r,filters[0].filterColumn.binding), filters(filters)  {
+        if (r.sorted[filters[0].filterColumn.colId].first){
+            useSorted = true;
+            bound = getBound();
+            columns = r.sorted[filters[0].filterColumn.colId].second;
+        }
+        else{
+            useSorted = false;
+            bound = pair<uint64_t, uint64_t>(0, r.size);
+            columns = r.columns;
+        }
+    };
     /// The constructor
     FilterScan(Relation& r,FilterInfo& filterInfo) : FilterScan(r,std::vector<FilterInfo>{filterInfo}) {};
     /// Require a column and add it to results

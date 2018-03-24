@@ -56,6 +56,7 @@ class Joiner {
     std::vector<std::string> getAsyncJoinResults();
 	/// print asyncJoin infos
 	void printAsyncJoinInfo();
+	void loadIndexs();
 
     void createAsyncQueryTask(QueryInfo& query);
     ~Joiner() {

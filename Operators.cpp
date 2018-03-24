@@ -14,6 +14,8 @@ uint64_t totFilterScan;
 uint64_t totJoin;
 uint64_t totSelfJoin;
 uint64_t totChecksum;
+uint64_t totUseIndex;
+uint64_t totNotUseIndex;
 #define DECL_CNT uint64_t __cnt = 0
 #define CNT ++__cnt
 #define CNT_FILTERSCAN __sync_fetch_and_add(&totFilterScan, __cnt)
@@ -89,8 +91,8 @@ bool FilterScan::require(SelectInfo info)
     assert(info.colId<relation.columns.size());
     if (select2ResultColId.find(info)==select2ResultColId.end()) {
         // Add to results
-        inputData.push_back(relation.sorted[filters[0].filterColumn.colId][info.colId]+bound.first);
-//        tmpResults.emplace_back();
+        inputData.push_back(columns[info.colId]+bound.first);
+//      tmpResults.emplace_back();
         unsigned colId=inputData.size()-1;
         select2ResultColId[info]=colId;
     }
@@ -100,7 +102,7 @@ bool FilterScan::require(SelectInfo info)
 bool FilterScan::applyFilter(uint64_t i,FilterInfo& f)
 // Apply filter
 {
-    auto compareCol=relation.columns[f.filterColumn.colId];
+    auto compareCol=columns[f.filterColumn.colId];
     auto constant=f.constant;
     switch (f.comparison) {
         case FilterInfo::Comparison::Equal:
@@ -125,7 +127,7 @@ void FilterScan::asyncRun(boost::asio::io_service& ioService) {
 //---------------------------------------------------------------------------
 pair<uint64_t, uint64_t> FilterScan::getBound() { // First location, Length
     FilterInfo &f(filters[0]);
-    uint64_t *arr = relation.sorted[f.filterColumn.colId][f.filterColumn.colId];
+    uint64_t *arr = relation.sorted[f.filterColumn.colId].second[f.filterColumn.colId];
 
     if (f.comparison == FilterInfo::Equal){
         auto bound = equal_range(arr,arr+relation.size, f.constant);
@@ -145,12 +147,16 @@ void FilterScan::createAsyncTasks(boost::asio::io_service& ioService) {
 #ifdef VERBOSE
     cout << "FilterScan("<< queryIndex << "," << operatorIndex <<")::createAsyncTasks" << endl;
 #endif
+#ifdef ANALYZE
+    totUseIndex+=useSorted;
+    totNotUseIndex+=!useSorted;
+#endif
     int cntTask = THREAD_NUM;
     for (int i=0; i<inputData.size(); i++) {
 		results.emplace_back(cntTask);
         CNT;
     }
-    if (filters.size() == 1){
+    if (useSorted && filters.size() == 1){
         for (unsigned cId=0;cId<inputData.size();++cId) {
             results[cId].addTuples(0, inputData[cId], bound.second);
             CNT;
@@ -220,7 +226,7 @@ void FilterScan::filterTask(boost::asio::io_service* ioService, int taskIndex, u
     }*/
     for (uint64_t i=start;i<start+length;++i) {
         bool pass=true;
-        for (unsigned j=1;j<filters.size();++j){
+        for (unsigned j=useSorted;j<filters.size();++j){
             pass&=applyFilter(i,filters[j]);
             CNT;
         }

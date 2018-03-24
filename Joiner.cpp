@@ -199,3 +199,11 @@ void Joiner::createAsyncQueryTask(QueryInfo& query)
     asyncResults.emplace_back();
     ioService.post(bind(&Joiner::join, this, query, nextQueryIndex++)); 
 }
+void Joiner::loadIndexs()
+{
+    for (auto &r : relations){
+        for (unsigned i=0;i<r.columns.size();++i){
+            ioService.post(bind(&Relation::loadIndex, &r, i)); 
+        }
+    }
+}

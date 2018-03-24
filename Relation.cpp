@@ -86,32 +86,37 @@ void Relation::loadRelation(const char* fileName)
         this->columns.push_back(reinterpret_cast<uint64_t*>(addr));
         addr+=size*sizeof(uint64_t);
     }
-
+    sorted.resize(numColumns);
+}
+//---------------------------------------------------------------------------
+void Relation::loadIndex(unsigned colId)
+{
     struct Comparer{
         bool operator()(const pair<uint64_t, uint64_t> &a, pair<uint64_t, uint64_t> &b){
             return a.first < b.first;
         }
     } comparer;
-    for (unsigned i=0;i<numColumns;++i) {
-        vector<pair<uint64_t,uint64_t>> idx;
-        //idx.reserve(size);
-        for (uint64_t j=0;j<size;++j){
-            idx.emplace_back(columns[i][j], j);
-        }
-        sort(idx.begin(), idx.end(), comparer); 
-        vector<uint64_t*> res;
-        //res.reserve(numColumns);
-        uint64_t *area = (uint64_t*)aligned_alloc(CACHE_LINE_SIZE, numColumns * size * sizeof(uint64_t));
-        for (unsigned j=0;j<numColumns;++j){
-            res.emplace_back(&area[j*size]);
-        }
-        for (unsigned j=0;j<numColumns;++j){
-            for (uint64_t k=0;k<size;k++){
-                res[j][k]=columns[j][idx[k].second];
-            }
-        }
-        sorted.emplace_back(res);
+
+    vector<pair<uint64_t,uint64_t>> idx;
+    idx.reserve(size);
+    for (uint64_t j=0;j<size;++j){
+        idx.emplace_back(columns[colId][j], j);
     }
+    sort(idx.begin(), idx.end(), comparer); 
+    vector<uint64_t*> res;
+    res.reserve(columns.size());
+    uint64_t *area = (uint64_t*)aligned_alloc(CACHE_LINE_SIZE, columns.size() * size * sizeof(uint64_t));
+    for (unsigned j=0;j<columns.size();++j){
+        res.emplace_back(&area[j*size]);
+    }
+    for (unsigned j=0;j<columns.size();++j){
+        for (uint64_t k=0;k<size;k++){
+            res[j][k]=columns[j][idx[k].second];
+        }
+    }
+    sorted[colId].second = move(res);
+    __sync_synchronize();
+    sorted[colId].first = true;
 }
 //---------------------------------------------------------------------------
 Relation::Relation(const char* fileName) : ownsMemory(false)
