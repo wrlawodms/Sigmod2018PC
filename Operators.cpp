@@ -79,7 +79,7 @@ bool FilterScan::require(SelectInfo info)
     return true;
 }
 //---------------------------------------------------------------------------
-bool FilterScan::applyFilter(uint64_t i,FilterInfo& f)
+inline bool FilterScan::applyFilter(uint64_t i,FilterInfo& f)
 // Apply filter
 {
     auto compareCol=relation.columns[f.filterColumn.colId];
@@ -717,11 +717,10 @@ void SelfJoin::createAsyncTasks(boost::asio::io_service& ioService) {
     }
 }
 //---------------------------------------------------------------------------
-void Checksum::asyncRun(boost::asio::io_service& ioService, int queryIndex) {
+void Checksum::asyncRun(boost::asio::io_service& ioService) {
 #ifdef VERBOSE
     cout << "Checksum(" << queryIndex << "," << operatorIndex << ")::asyncRun()" << endl;
 #endif
-    this->queryIndex = queryIndex;
     pendingAsyncOperator = 1;
     for (auto& sInfo : colInfo) {
         input->require(sInfo);

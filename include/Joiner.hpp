@@ -25,12 +25,16 @@ class Joiner {
     boost::asio::io_service::work work;
     
     int pendingAsyncJoin = 0;
+    int pendingParsingQuery = 0;
     int nextQueryIndex = 0;
     std::vector<std::vector<uint64_t>> asyncResults; //checksums
     std::vector<std::shared_ptr<Checksum>> asyncJoins;
 //    std::vector<std::shared_ptr<Checksum>> tmp;
     std::condition_variable cvAsync;
     std::mutex cvAsyncMt;
+    
+    std::condition_variable cvParsing;
+    std::mutex cvParsingMt;
     
     public:
     Joiner(int threadNum) : work(ioService) {
@@ -50,6 +54,8 @@ class Joiner {
     Relation& getRelation(unsigned id);
     /// Joins a given set of relations
     void join(QueryInfo& i, int queryIndex);
+    /// run all registered joins aynchronously
+    void runAsyncJoins();
     /// wait for async joins
     void waitAsyncJoins();
     /// return parsed asyncResults 
@@ -58,6 +64,7 @@ class Joiner {
 	void printAsyncJoinInfo();
 
     void createAsyncQueryTask(QueryInfo& query);
+    void waitAsyncParsing();
     ~Joiner() {
         ioService.stop();
         threadPool.join_all();

@@ -28,6 +28,26 @@ void Joiner::printAsyncJoinInfo() {
 
 }
 //---------------------------------------------------------------------------
+void Joiner::runAsyncJoins() {
+   __sync_synchronize();
+   for (auto op : asyncJoins) {
+#ifdef VERBOSE
+	cout << "Joiner: Query runs asynchrounously: " << op->queryIndex << endl; 
+#endif
+       op->asyncRun(ioService);
+   }
+}
+//---------------------------------------------------------------------------
+void Joiner::waitAsyncParsing() {
+    unique_lock<mutex> lk(cvParsingMt);
+    if (pendingParsingQuery > 0)  {
+#ifdef VERBOSE
+        cout << "Joiner: wait async parsing" << endl;
+#endif
+        cvParsing.wait(lk); 
+    }
+}
+//---------------------------------------------------------------------------
 void Joiner::waitAsyncJoins() {
     unique_lock<mutex> lk(cvAsyncMt);
     if (pendingAsyncJoin > 0)  {
@@ -180,20 +200,25 @@ void Joiner::join(QueryInfo& query, int queryIndex)
         };
     }
 
-    std::shared_ptr<Checksum> checkSum = std::make_shared<Checksum>(*this, root, query.selections);
+    std::shared_ptr<Checksum> checkSum = std::make_shared<Checksum>(*this, root, query.selections, queryIndex);
 #ifdef VERBOSE
     checkSum->setOperatorIndex(opIdx++);
 #endif
     root->setParent(checkSum);
-#ifdef VERBOSE
-	cout << "Joiner: Query runs asynchrounously: " << queryIndex << endl; 
-#endif
 	asyncJoins[queryIndex] = checkSum;
-	checkSum->asyncRun(ioService, queryIndex); 
+#ifdef VERBOSE
+	cout << "Joiner: Query parsing finished: " << queryIndex << endl; 
+#endif
+    if(__sync_sub_and_fetch(&pendingParsingQuery, 1) == 0) {
+        unique_lock<mutex> lk(cvParsingMt); // guard for missing notification
+        cvParsing.notify_one();
+    }
+	//checkSum->asyncRun(ioService, queryIndex); 
 }
 //---------------------------------------------------------------------------
 void Joiner::createAsyncQueryTask(QueryInfo& query)
 {
+	__sync_fetch_and_add(&pendingParsingQuery, 1);
 	__sync_fetch_and_add(&pendingAsyncJoin, 1);
     asyncJoins.emplace_back();
     asyncResults.emplace_back();

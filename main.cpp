@@ -47,6 +47,10 @@ int main(int argc, char* argv[]) {
     while (getline(cin, line)) {
         //if (line == "F") continue; // End of a batch
         if (line == "F") { // End of a batch
+            joiner.waitAsyncParsing();
+            // 여기서 뭐 각 트리를 이용한 최적화를 하면 된다.
+            // 트리 다 만들어짐.
+            joiner.runAsyncJoins();           
             joiner.waitAsyncJoins();
             auto results = joiner.getAsyncJoinResults(); // result strings vector
             for (auto& result : results)

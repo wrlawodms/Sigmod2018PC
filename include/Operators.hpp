@@ -233,22 +233,21 @@ class Checksum : public Operator {
     std::shared_ptr<Operator> input;
     /// The join predicate info
     std::vector<SelectInfo> colInfo;
-    /// Query Index
-    int queryIndex;
     
     int pendingTask = -1;
     unsigned minTuplesPerTask = 100;
     void checksumTask(boost::asio::io_service* ioService, int taskIndex, uint64_t start, uint64_t length);
 
 public:
+    /// Query Index
+    const int queryIndex;
     std::vector<uint64_t> checkSums;
     /// The constructor
-    Checksum(Joiner& joiner, std::shared_ptr<Operator>& input,std::vector<SelectInfo> colInfo) : joiner(joiner), input(input), colInfo(colInfo) {};
+    Checksum(Joiner& joiner, std::shared_ptr<Operator>& input,std::vector<SelectInfo> colInfo, int queryIndex) : joiner(joiner), input(input), colInfo(colInfo), queryIndex(queryIndex) {};
     /// Request a column and add it to results
     bool require(SelectInfo info) override { throw; /* check sum is always on the highest level and thus should never request anything */ }
     /// AsyncRun
-    virtual void asyncRun(boost::asio::io_service& ioService, int queryIndex);
-    virtual void asyncRun(boost::asio::io_service& ioService) {}
+    virtual void asyncRun(boost::asio::io_service& ioService) override;
     /// only call it if pendingAsyncOperator=0, and can getResults()
     virtual void createAsyncTasks(boost::asio::io_service& ioService) override;
     /// root node register result value to joiner
