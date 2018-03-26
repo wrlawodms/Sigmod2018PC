@@ -158,7 +158,8 @@ void FilterScan::filterTask(boost::asio::io_service* ioService, int taskIndex, u
     for (uint64_t i=start;i<start+length;++i) {
         bool pass=true;
         for (auto& f : filters) {
-            pass&=applyFilter(i,f);
+            if(!(pass=applyFilter(i,f)))
+                break;
         }
         if (pass) {
             for (unsigned cId=0;cId<inputData.size();++cId)
