@@ -118,7 +118,7 @@ class FilterScan : public Scan {
 public:
     /// The constructor
     FilterScan(Relation& r,std::vector<FilterInfo> filters) : Scan(r,filters[0].filterColumn.binding), filters(filters)  {
-        if (r.sorted[filters[0].filterColumn.colId].first){
+        if (r.sorted[filters[0].filterColumn.colId].first == 2){
             useSorted = true;
             bound = getBound();
             columns = r.sorted[filters[0].filterColumn.colId].second;

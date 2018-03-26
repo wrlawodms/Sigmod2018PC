@@ -87,6 +87,7 @@ void Relation::loadRelation(const char* fileName)
         addr+=size*sizeof(uint64_t);
     }
     sorted.resize(numColumns);
+    loadHistogram();
 }
 //---------------------------------------------------------------------------
 void Relation::loadIndex(unsigned colId)
@@ -116,7 +117,7 @@ void Relation::loadIndex(unsigned colId)
     }
     sorted[colId].second = move(res);
     __sync_synchronize();
-    sorted[colId].first = true;
+    sorted[colId].first = 2;
 }
 //---------------------------------------------------------------------------
 Relation::Relation(const char* fileName) : ownsMemory(false)
@@ -131,6 +132,19 @@ Relation::~Relation()
     if (ownsMemory) {
         for (auto c : columns)
             delete[] c;
+    }
+}
+//---------------------------------------------------------------------------
+void Relation::loadHistogram()
+{
+	histograms.reserve(columns.size());
+	for (auto &c:columns){
+        map<uint64_t, uint64_t> hist;
+
+		for (unsigned i=0;i<size;i+=HISTOGRAM_SAMPLE){
+            ++hist[c[i] >> HISTOGRAM_SHIFT];
+		}
+        histograms.emplace_back(move(hist));
     }
 }
 //---------------------------------------------------------------------------

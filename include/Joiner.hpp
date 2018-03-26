@@ -57,6 +57,8 @@ class Joiner {
 	/// print asyncJoin infos
 	void printAsyncJoinInfo();
 	void loadIndexs();
+    uint64_t estimatePredicateSelectivity(PredicateInfo &p);
+    uint64_t estimateFilterSelectivity(FilterInfo &f);
 
     void createAsyncQueryTask(QueryInfo& query);
     ~Joiner() {
