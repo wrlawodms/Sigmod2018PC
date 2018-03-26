@@ -111,6 +111,22 @@ void Joiner::join(QueryInfo& query, int queryIndex)
 {
     //cerr << query.dumpText() << endl;
     set<unsigned> usedRelations;
+//    for (auto &f : query.filters){
+//        Relation &r(relations[f.filterColumn.relId]);
+//        if (!r.sorted[f.filterColumn.colId].first &&
+//                __sync_bool_compare_and_swap(&r.sorted[f.filterColumn.colId].first, 0, 1)){
+//            ioService.post(bind(&Relation::loadIndex, &relations[f.filterColumn.relId], f.filterColumn.colId)); 
+//        }
+//    }
+//    for (auto &p : query.predicates){
+//        p.sel = estimatePredicateSelectivity(p);
+//    }
+//    struct PredicateComparer{
+//        bool operator()(const PredicateInfo &a, const PredicateInfo &b){
+//            return a.sel < b.sel;
+//        }
+//    } predicateComparer;
+//    sort(query.predicates.begin(), query.predicates.end(), predicateComparer);
     // We always start with the first join predicate and append the other joins to it (--> left-deep join trees)
     // You might want to choose a smarter join ordering ...
     auto& firstJoin=query.predicates[0];
@@ -129,13 +145,32 @@ void Joiner::join(QueryInfo& query, int queryIndex)
 #endif
     left->setParent(root);
     right->setParent(root); 
+    unsigned selfJoinCheck = query.predicates.size();
 
     for (unsigned i=1;i<query.predicates.size();++i) {
         auto& pInfo=query.predicates[i];
         assert(pInfo.left < pInfo.right); 
         auto& leftInfo=pInfo.left; auto& rightInfo=pInfo.right;
         shared_ptr<Operator> left, right;
-        switch(analyzeInputOfJoin(usedRelations,leftInfo,rightInfo)) {
+        auto res = analyzeInputOfJoin(usedRelations,leftInfo,rightInfo);
+        if (i < selfJoinCheck){
+            if (res == QueryGraphProvides::Both){
+                // All relations of this join are already used somewhere else in the query.
+                // Thus, we have either a cycle in our join graph or more than one join predicate per join.
+                left = root;
+                root=make_shared<SelfJoin>(left,pInfo);
+#ifdef VERBOSE
+                root->setOperatorIndex(opIdx++);
+                root->setQeuryIndex(nextQueryIndex);
+#endif
+                left->setParent(root);
+            }
+            else{
+                query.predicates.push_back(pInfo);
+            }
+            continue;
+        }
+        switch(res) {
             case QueryGraphProvides::Left:
                 left=root;
                 right=addScan(usedRelations,rightInfo,query);
@@ -148,6 +183,7 @@ void Joiner::join(QueryInfo& query, int queryIndex)
 #endif
                 left->setParent(root);
                 right->setParent(root);
+                selfJoinCheck = query.predicates.size(); 
                 break;
             case QueryGraphProvides::Right:
                 left=addScan(usedRelations,leftInfo,query);
@@ -161,17 +197,7 @@ void Joiner::join(QueryInfo& query, int queryIndex)
 #endif
                 left->setParent(root);
                 right->setParent(root);
-                break;
-            case QueryGraphProvides::Both:
-                // All relations of this join are already used somewhere else in the query.
-                // Thus, we have either a cycle in our join graph or more than one join predicate per join.
-                left = root;
-                root=make_shared<SelfJoin>(left,pInfo);
-#ifdef VERBOSE
-                root->setOperatorIndex(opIdx++);
-                root->setQeuryIndex(nextQueryIndex);
-#endif
-                left->setParent(root);
+                selfJoinCheck = query.predicates.size(); 
                 break;
             case QueryGraphProvides::None:
                 // Process this predicate later when we can connect it to the other joins
@@ -199,4 +225,80 @@ void Joiner::createAsyncQueryTask(QueryInfo& query)
     asyncJoins.emplace_back();
     asyncResults.emplace_back();
     ioService.post(bind(&Joiner::join, this, query, nextQueryIndex++)); 
+}
+void Joiner::loadIndexs()
+{
+    for (RelationId i=0;i<relations.size();++i){
+        for (unsigned j=0;j<relations[i].columns.size();++j){
+            ioService.post(bind(&Relation::loadIndex, &relations[i], j)); 
+        }
+    }
+//    while(1){
+//        bool pass = true;
+//        for (auto &r : relations){
+//            for (unsigned i=0;i<r.columns.size();++i){
+//                pass &= (r.sorted[i].first != 0);
+//            }
+//        }
+//        if (pass)
+//            break;
+//        usleep(1000000);
+//    }
+}
+uint64_t Joiner::estimatePredicateSelectivity(PredicateInfo &p)
+{
+    uint64_t res = 0;
+    map<uint64_t, uint64_t> &left(relations[p.left.relId].histograms[p.left.colId]);
+    map<uint64_t, uint64_t> &right(relations[p.right.relId].histograms[p.right.colId]);
+    auto l = left.begin();
+    auto r = right.begin();
+    while(l != left.end() && r != right.end()){
+        if (l->first == r->first){
+            res += l->second * r->second;
+            ++l;
+            ++r;
+        }
+        else if (l->first < r->first){
+            ++l;
+        }
+        else{
+            ++r;
+        }
+    }
+    return (double)res * HISTOGRAM_SAMPLE * HISTOGRAM_SAMPLE / (1 <<HISTOGRAM_SHIFT);// / relations[p.left.relId].size / relations[p.right.relId].size;
+}
+uint64_t Joiner::estimateFilterSelectivity(FilterInfo &f)
+{
+    uint64_t res = 0;
+//    map<uint64_t, uint64_t> &hist(relations[f.filterColumn.relId].histograms[f.filterColumn.colId]);
+//    if (f.comparison == FilterInfo::Equal){
+//        auto iter = hist.find(f.constant>>HISTOGRAM_SHIFT); 
+//        if (iter != hist.end()){
+//            res=iter->second*(f.constant - (iter->first<<HISTOGRAM_SHIFT) + 1)/ (1<<HISTOGRAM_SHIFT);
+//        }
+//    }
+//    else if (f.comparison == FilterInfo::Less){
+//        auto end = hist.lower_bound(f.constant>>HISTOGRAM_SHIFT); 
+//        if (hist.begin() != end){
+//            --end;
+//            for (auto iter = hist.begin(); iter != end; ++iter){
+//                res+=iter->second;
+//            }
+//            if (((end->first+1)<<HISTOGRAM_SHIFT) > (f.constant)){
+//                res+=end->second*(f.constant - (end->first<<HISTOGRAM_SHIFT))/ (1<<HISTOGRAM_SHIFT);
+//            }
+//            else{
+//                res+=end->second;
+//            }
+//        }
+//    }
+//    else{
+//        auto start = hist.lower_bound((f.constant+1)>>HISTOGRAM_SHIFT); 
+//        if (start 
+//        res+=start->second * ((1<<HISTOGRAM_SHIFT) - (f.constant - (start->first<<HISTOGRAM_SHIFT)+1))/(1<<HISTOGRAM_SHIFT);
+//        for (auto iter = start; iter != hist.end(); ++iter){
+//            res+=iter->second;
+//        }
+//    }
+    return (double)res * HISTOGRAM_SAMPLE;
 }

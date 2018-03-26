@@ -2,6 +2,7 @@
 #include <cstdint>
 #include <string>
 #include <vector>
+#include <map>
 
 using RelationId = unsigned;
 //---------------------------------------------------------------------------
@@ -17,6 +18,8 @@ public:
     uint64_t size;
     /// The join column containing the keys
     std::vector<uint64_t*> columns;
+    std::vector<std::map<uint64_t, uint64_t>> histograms;
+    std::vector<std::pair<unsigned, std::vector<uint64_t*>>> sorted;
 
     /// Stores a relation into a file (binary)
     void storeRelation(const std::string& fileName);
@@ -24,6 +27,8 @@ public:
     void storeRelationCSV(const std::string& fileName);
     /// Dump SQL: Create and load table (PostgreSQL)
     void dumpSQL(const std::string& fileName,unsigned relationId);
+    void loadIndex(unsigned colId);
+    void loadHistogram();
 
     /// Constructor without mmap
     Relation(uint64_t size,std::vector<uint64_t*>&& columns) : ownsMemory(true), size(size), columns(columns) {}
