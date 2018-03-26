@@ -92,7 +92,7 @@ bool FilterScan::require(SelectInfo info)
     assert(info.colId<relation.columns.size());
     if (select2ResultColId.find(info)==select2ResultColId.end()) {
         // Add to results
-        inputData.push_back(columns[info.colId]+bound.first);
+        inputData.push_back(columns[info.colId]);
 //      tmpResults.emplace_back();
         unsigned colId=inputData.size()-1;
         select2ResultColId[info]=colId;
@@ -159,7 +159,7 @@ void FilterScan::createAsyncTasks(boost::asio::io_service& ioService) {
     }
     if (useSorted && filters.size() == 1){
         for (unsigned cId=0;cId<inputData.size();++cId) {
-            results[cId].addTuples(0, inputData[cId], bound.second);
+            results[cId].addTuples(0, inputData[cId]+bound.first, bound.second);
             CNT;
         }
         for (unsigned cId=0;cId<inputData.size();++cId) {
@@ -204,7 +204,7 @@ void FilterScan::createAsyncTasks(boost::asio::io_service& ioService) {
 	
     __sync_synchronize(); 
     // uint64_t length = partitionSize/(relation.columns.size()*8); 
-    uint64_t start = 0;
+    uint64_t start = bound.first;
     for (unsigned i=0; i<cntTask; i++) {
         uint64_t length = taskLength;
         if (rest) {
