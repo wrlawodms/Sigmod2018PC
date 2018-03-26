@@ -71,6 +71,11 @@ struct PredicateInfo {
     std::string dumpText();
     /// Dump SQL
     std::string dumpSQL();
+    
+    /// Equality operator
+    inline bool operator==(const PredicateInfo& o) const {
+        return o.left == left && o.right == right;
+    }
 
     /// The delimiter used in our text format
     static const char delimiter='&';

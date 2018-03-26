@@ -67,10 +67,19 @@ void QueryInfo::parsePredicate(string& rawPredicate)
         filters.emplace_back(leftSelect,constant,FilterInfo::Comparison(compType));
     } else {
         auto rightSelect=parseRelColPair(relCols[1]);
-        if (leftSelect < rightSelect) { 
-            predicates.emplace_back(leftSelect, rightSelect);
+    
+        if (leftSelect < rightSelect) {
+            PredicateInfo p(leftSelect, rightSelect);
+            if (find(predicates.begin(), predicates.end(), p) == predicates.end())  
+                predicates.emplace_back(move(p));
+//            else 
+//                cerr << "redundant remove " << p.dumpText() << endl;
         } else {
-            predicates.emplace_back(rightSelect, leftSelect);
+            PredicateInfo p(rightSelect, leftSelect);
+            if (find(predicates.begin(), predicates.end(), p) == predicates.end())  
+                predicates.emplace_back(move(p));
+//            else 
+//                cerr << "redundant remove " << p.dumpText() << endl;
         }
     }
 }
