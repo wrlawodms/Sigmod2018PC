@@ -2,6 +2,7 @@
 #include <iostream>
 #include <utility>
 #include <sstream>
+#include <list>
 #include "Parser.hpp"
 //---------------------------------------------------------------------------
 using namespace std;
@@ -91,6 +92,25 @@ void QueryInfo::parsePredicates(string& text)
     splitString(text,predicateStrings,'&');
     for (auto& rawPredicate : predicateStrings) {
         parsePredicate(rawPredicate);
+   }
+}
+//---------------------------------------------------------------------------
+void QueryInfo::addFilterPredicates() {
+    for (int i=0; i < filters.size(); i++) {
+        auto& f = filters[i];
+        for (auto& p : predicates) {
+            if (p.left == f.filterColumn) {
+                FilterInfo newF = f;
+                newF.filterColumn = p.right;
+                if (find(filters.begin(), filters.end(), newF) == filters.end())
+                    filters.push_back(move(newF));
+            } else if (p.right == f.filterColumn) {
+                FilterInfo newF = f;
+                newF.filterColumn = p.left;
+                if (find(filters.begin(), filters.end(), newF) == filters.end())
+                    filters.push_back(move(newF));
+            }
+        } 
     }
 }
 //---------------------------------------------------------------------------
@@ -137,6 +157,7 @@ void QueryInfo::parseQuery(string& rawQuery)
     assert(queryParts.size()==3);
     parseRelationIds(queryParts[0]);
     parsePredicates(queryParts[1]);
+    addFilterPredicates();
     parseSelections(queryParts[2]);
     resolveRelationIds();
 }
