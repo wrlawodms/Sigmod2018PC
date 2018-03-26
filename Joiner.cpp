@@ -132,6 +132,7 @@ void Joiner::join(QueryInfo& query, int queryIndex)
 
     for (unsigned i=1;i<query.predicates.size();++i) {
         auto& pInfo=query.predicates[i];
+        assert(pInfo.left < pInfo.right); 
         auto& leftInfo=pInfo.left; auto& rightInfo=pInfo.right;
         shared_ptr<Operator> left, right;
         switch(analyzeInputOfJoin(usedRelations,leftInfo,rightInfo)) {
