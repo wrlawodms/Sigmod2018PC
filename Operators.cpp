@@ -263,13 +263,13 @@ void Join::createAsyncTasks(boost::asio::io_service& ioService) {
 
     // cntPartition = CNT_PARTITIONS(right->getResultsSize(), partitionSize); 
 	cntPartition = CNT_PARTITIONS(left->getResultsSize(), partitionSize); 
+    if (cntPartition < 32) 
+        cntPartition = 32 < left->getResultsSize() ? 32 : left->getResultsSize();
     cntPartition = 1<<(Utils::log2(cntPartition-1)+1); // round up, power of 2 for hashing
     	
 #ifdef VERBOSE
     cout << "Join("<< queryIndex << "," << operatorIndex <<") Right table size: " << right->getResultsSize() << " cnt_tuple: " << right->resultSize << " Left table size: " << left->getResultsSize() << " cnt_tuple: " << left->resultSize << " cntPartition: " << cntPartition << endl;
 #endif
-    if (cntPartition < 32) 
-        cntPartition = 32;
     
     /*
     if (cntPartition == 1) {
@@ -462,7 +462,7 @@ void Join::histogramTask(boost::asio::io_service* ioService, int cntTask, int ta
                 length++;
                 rest--;
             }
-            ioService->post(bind(&Join::scatteringTask, this, ioService, i, leftOrRight, start, length)); // for left
+            ioService->post(bind(&Join::scatteringTask, this, ioService, i, leftOrRight, start, length));
             start += length;
         }
     }
@@ -511,17 +511,31 @@ void Join::scatteringTask(boost::asio::io_service* ioService, int taskIndex, int
         insertOffs[hashResult]++;
     }
     int remainder = __sync_sub_and_fetch(&pendingScattering[leftOrRight*CACHE_LINE_SIZE], 1);
-    if (UNLIKELY(remainder == 0)) { // gogo scattering
+    if (UNLIKELY(remainder == 0)) { 
         int remPart = __sync_sub_and_fetch(&pendingPartitioning, 1);
         if (remPart == 0) {
-            pendingSubjoin = cntPartition;
+            vector<unsigned> subJoinTarget;
+            for (int i=0; i<cntPartition; i++) {
+                if (partitionLength[0][i] != 0 && partitionLength[1][i] != 0) {
+                    subJoinTarget.push_back(i);
+                }
+            }
+            if(subJoinTarget.size() == 0) { // left !=0 이지만 양쪽이 서로 다른 파티션으로만 나뉜경우 
+                for (unsigned cId=0;cId<requestedColumns.size();++cId) {
+                    results[cId].fix();
+                }
+                free(partitionTable[0]);
+                free(partitionTable[1]);
+                finishAsyncRun(*ioService, true); 
+                return;         
+            }
+            pendingSubjoin = subJoinTarget.size();
             __sync_synchronize();
 #ifdef VERBOSE
             cout << "Join("<< queryIndex << "," << operatorIndex <<") All partitioning are done. " << endl << "create subJoinTasks " <<endl;
 #endif
-            int taskNum = cntPartition;
-            for (int i=0; i<taskNum; i++) {
-                ioService->post(bind(&Join::subJoinTask, this, ioService, i, partition[0][i], partitionLength[0][i], partition[1][i], partitionLength[1][i]));
+            for (auto& sj : subJoinTarget) {
+                ioService->post(bind(&Join::subJoinTask, this, ioService, sj, partition[0][sj], partitionLength[0][sj], partition[1][sj], partitionLength[1][sj]));
                  // cout << "Join("<< queryIndex << "," << operatorIndex <<")" << " Part Size(L,R) (" << i << "): " << partitionLength[0][i] << ", " << partitionLength[1][i] << endl;
             }
         }
@@ -595,10 +609,8 @@ sub_join_finish:
         for (unsigned cId=0;cId<requestedColumns.size();++cId) {
             results[cId].fix();
         }
-        if (cntPartition != 1) { // if 1, no partitioning
-            free(partitionTable[0]);
-            free(partitionTable[1]);
-        } //만약 finishAsyncRun하고 free하면, free하려는데 query가 다 끝나서 partitionTable[]이 없을 수 있다.
+        free(partitionTable[0]);
+        free(partitionTable[1]);
         finishAsyncRun(*ioService, true); 
     }
     //일단은 그냥 left로 building하자. 나중에 최적화된 방법으로 ㄲ
