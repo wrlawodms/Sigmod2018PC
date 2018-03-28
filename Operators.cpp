@@ -530,7 +530,8 @@ void Join::scatteringTask(boost::asio::io_service* ioService, int taskIndex, int
 	for (uint64_t i=start, limit=start+length; i<limit; i++, ++keyIt) {
         uint64_t hashResult = RADIX_HASH(*keyIt, cntPartition);
         uint64_t insertBase;
-        uint64_t insertOff = insertOffs[hashResult];
+        uint64_t insertOff = insertOffs[hashResult]++;
+//        insertOffs[hashResult]++;
         
         if (UNLIKELY(taskIndex == 0))
             insertBase = 0;
@@ -541,7 +542,6 @@ void Join::scatteringTask(boost::asio::io_service* ioService, int taskIndex, int
             partition[leftOrRight][hashResult][j][insertBase+insertOff] = *(colIt[j]);
 			++(colIt[j]);
         }
-        insertOffs[hashResult]++;
     }
     int remainder = __sync_sub_and_fetch(&pendingScattering[leftOrRight*CACHE_LINE_SIZE], 1);
     if (UNLIKELY(remainder == 0)) { // gogo scattering
