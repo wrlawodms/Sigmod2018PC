@@ -228,7 +228,8 @@ void FilterScan::filterTask(boost::asio::io_service* ioService, int taskIndex, u
     for (uint64_t i=start;i<start+length;++i) {
         bool pass=true;
         for (unsigned j=useSorted;j<filters.size();++j){
-            pass&=applyFilter(i,filters[j]);
+            if (!(pass&=applyFilter(i,filters[j])))
+                break;
             CNT;
         }
         if (pass) {
@@ -341,10 +342,14 @@ void Join::createAsyncTasks(boost::asio::io_service& ioService) {
     // cntPartition = CNT_PARTITIONS(right->getResultsSize(), partitionSize); 
 	cntPartition = CNT_PARTITIONS(left->getResultsSize(), partitionSize); 
     cntPartition = 1<<(Utils::log2(cntPartition-1)+1); // round up, power of 2 for hashing
+    	
 #ifdef VERBOSE
     cout << "Join("<< queryIndex << "," << operatorIndex <<") Right table size: " << right->getResultsSize() << " cnt_tuple: " << right->resultSize << " Left table size: " << left->getResultsSize() << " cnt_tuple: " << left->resultSize << " cntPartition: " << cntPartition << endl;
 #endif
-	/*
+    if (cntPartition < 32) 
+        cntPartition = 32;
+    
+    /*
     if (cntPartition == 1) {
         pendingSubjoin = 1;
         __sync_synchronize();

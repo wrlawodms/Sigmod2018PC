@@ -61,7 +61,7 @@ class Joiner {
     uint64_t estimateFilterSelectivity(FilterInfo &f, uint64_t inputSize);
     uint64_t calculateFilter(FilterInfo &f, uint64_t inputSize);
 
-    void createAsyncQueryTask(QueryInfo& query);
+    void createAsyncQueryTask(std::string line);
     ~Joiner() {
         ioService.stop();
         threadPool.join_all();

@@ -80,8 +80,8 @@ int main(int argc, char* argv[]) {
                 cout << result;
             continue;
         }
-        i.parseQuery(line);
-        joiner.createAsyncQueryTask(i);
+        //i.parseQuery(line);
+        joiner.createAsyncQueryTask(line);
         //cout << joiner.join(i);
 #ifdef ANALYZE
         ++numRelation[i.relationIds.size()];

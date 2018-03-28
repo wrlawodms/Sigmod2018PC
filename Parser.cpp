@@ -148,6 +148,28 @@ void QueryInfo::resolveRelationIds()
     }
 }
 //---------------------------------------------------------------------------
+void QueryInfo::reorderPredicates() {
+    sort(predicates.begin(), predicates.end(), [&](const PredicateInfo& a, const PredicateInfo& b) -> bool {
+        int aScore = 0;
+        int bScore = 0;
+        for(auto& f : filters) {
+            if (f.filterColumn.binding == a.left.binding || f.filterColumn.binding == a.right.binding){
+                if (f.comparison == FilterInfo::Comparison::Equal)
+                    aScore += 1000;
+                else
+                    aScore += 1;
+            }
+            if (f.filterColumn.binding == b.left.binding || f.filterColumn.binding == b.right.binding){
+                if (f.comparison == FilterInfo::Comparison::Equal)
+                    bScore += 1000;
+                else
+                    bScore += 1;
+            }
+        }
+        return aScore > bScore;
+    });
+}
+//---------------------------------------------------------------------------
 void QueryInfo::parseQuery(string& rawQuery)
 // Parse query [RELATIONS]|[PREDICATES]|[SELECTS]
 {
@@ -158,6 +180,25 @@ void QueryInfo::parseQuery(string& rawQuery)
     parseRelationIds(queryParts[0]);
     parsePredicates(queryParts[1]);
     addFilterPredicates();
+    /*
+    cerr << "-------qurey join before----" << endl;
+    for (auto& pre : predicates) {
+        cerr << pre.dumpText() << endl;
+    }
+    */
+    reorderPredicates();
+    /*
+    cerr << "-------qurey join after----" << endl;
+    for (auto& pre : predicates) {
+        cerr << pre.dumpText() << endl;
+    }
+    */
+    /*
+    cerr << "-------filters----" << endl;
+    for (auto& f : filters) {
+        cerr << f.dumpText() << endl;
+    }
+    */
     parseSelections(queryParts[2]);
     resolveRelationIds();
 }

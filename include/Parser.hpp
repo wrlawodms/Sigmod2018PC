@@ -108,6 +108,7 @@ private:
     /// Resolve bindings of relation ids
     void resolveRelationIds();
     void addFilterPredicates();
+    void reorderPredicates();
 
 public:
     /// Parse relation ids <r1> <r2> ...
