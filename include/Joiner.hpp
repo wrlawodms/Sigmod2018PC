@@ -18,7 +18,7 @@ class Operator;
 class Joiner {
     friend Checksum;
     /// Add scan to query
-    std::shared_ptr<Operator> addScan(SelectInfo& info,QueryInfo& query);
+    std::shared_ptr<Operator> addScan(std::set<unsigned>& usedRelations,SelectInfo& info,QueryInfo& query);
  
     boost::asio::io_service ioService;
     boost::thread_group threadPool;
