@@ -118,15 +118,22 @@ void Joiner::join(QueryInfo& query, int queryIndex)
 //            ioService.post(bind(&Relation::loadIndex, &relations[f.filterColumn.relId], f.filterColumn.colId)); 
 //        }
 //    }
-//    for (auto &p : query.predicates){
-//        p.sel = estimatePredicateSelectivity(p);
-//    }
-//    struct PredicateComparer{
-//        bool operator()(const PredicateInfo &a, const PredicateInfo &b){
-//            return a.sel < b.sel;
-//        }
-//    } predicateComparer;
-//    sort(query.predicates.begin(), query.predicates.end(), predicateComparer);
+    uint64_t simulSize[4];
+    for (unsigned i = 0; i < query.relationIds.size(); i++){
+        simulSize[i] = relations[query.relationIds[i]].size;
+    }
+    for (auto &f : query.filters){
+        simulSize[f.filterColumn.binding] = estimateFilterSelectivity(f, simulSize[f.filterColumn.binding]);
+    }
+    for (auto &p : query.predicates){
+        p.sel = estimatePredicateSelectivity(p, simulSize[p.left.binding], simulSize[p.right.binding]);
+    }
+    struct PredicateComparer{
+        bool operator()(const PredicateInfo &a, const PredicateInfo &b){
+            return a.sel < b.sel;
+        }
+    } predicateComparer;
+    sort(query.predicates.begin(), query.predicates.end(), predicateComparer);
     // We always start with the first join predicate and append the other joins to it (--> left-deep join trees)
     // You might want to choose a smarter join ordering ...
     auto& firstJoin=query.predicates[0];
@@ -245,7 +252,7 @@ void Joiner::loadIndexs()
 //        usleep(1000000);
 //    }
 }
-uint64_t Joiner::estimatePredicateSelectivity(PredicateInfo &p)
+uint64_t Joiner::estimatePredicateSelectivity(PredicateInfo &p, uint64_t leftSize, uint64_t rightSize)
 {
     uint64_t res = 0;
     map<uint64_t, uint64_t> &left(relations[p.left.relId].histograms[p.left.colId]);
@@ -265,40 +272,70 @@ uint64_t Joiner::estimatePredicateSelectivity(PredicateInfo &p)
             ++r;
         }
     }
-    return (double)res * HISTOGRAM_SAMPLE * HISTOGRAM_SAMPLE / (1 <<HISTOGRAM_SHIFT);// / relations[p.left.relId].size / relations[p.right.relId].size;
+    //uint64_t buildSize = min(relations[p.left.relId].size, relations[p.right.relId].size);
+    //return buildSize + res * HISTOGRAM_SAMPLE * HISTOGRAM_SAMPLE / (1 <<HISTOGRAM_SHIFT);
+    return leftSize + rightSize + res * HISTOGRAM_SAMPLE * HISTOGRAM_SAMPLE / (1 <<HISTOGRAM_SHIFT);
 }
-uint64_t Joiner::estimateFilterSelectivity(FilterInfo &f)
+uint64_t Joiner::estimateFilterSelectivity(FilterInfo &f, uint64_t inputSize)
 {
     uint64_t res = 0;
-//    map<uint64_t, uint64_t> &hist(relations[f.filterColumn.relId].histograms[f.filterColumn.colId]);
-//    if (f.comparison == FilterInfo::Equal){
-//        auto iter = hist.find(f.constant>>HISTOGRAM_SHIFT); 
-//        if (iter != hist.end()){
-//            res=iter->second*(f.constant - (iter->first<<HISTOGRAM_SHIFT) + 1)/ (1<<HISTOGRAM_SHIFT);
-//        }
-//    }
-//    else if (f.comparison == FilterInfo::Less){
-//        auto end = hist.lower_bound(f.constant>>HISTOGRAM_SHIFT); 
-//        if (hist.begin() != end){
-//            --end;
-//            for (auto iter = hist.begin(); iter != end; ++iter){
-//                res+=iter->second;
-//            }
-//            if (((end->first+1)<<HISTOGRAM_SHIFT) > (f.constant)){
-//                res+=end->second*(f.constant - (end->first<<HISTOGRAM_SHIFT))/ (1<<HISTOGRAM_SHIFT);
-//            }
-//            else{
-//                res+=end->second;
-//            }
-//        }
+    map<uint64_t, uint64_t> &hist(relations[f.filterColumn.relId].histograms[f.filterColumn.colId]);
+    if (f.comparison == FilterInfo::Equal){
+        auto iter = hist.find(f.constant>>HISTOGRAM_SHIFT); 
+        if (iter != hist.end()){
+            res=iter->second*(f.constant - (iter->first<<HISTOGRAM_SHIFT) + 1)/ (1<<HISTOGRAM_SHIFT);
+        }
+    }
+    else if (f.comparison == FilterInfo::Less){
+        auto end = hist.lower_bound(f.constant>>HISTOGRAM_SHIFT); 
+        for (auto iter = hist.begin(); iter != end; ++iter){
+            res+=iter->second;
+        }
+        if (end != hist.end()){
+            res+=end->second*(f.constant < (end->first<<HISTOGRAM_SHIFT) ? 1 : (f.constant - (end->first<<HISTOGRAM_SHIFT))/ (1<<HISTOGRAM_SHIFT));
+        }
+    }
+    else{
+        auto start = hist.lower_bound((f.constant+1)>>HISTOGRAM_SHIFT); 
+        if (start != hist.end()){
+            res+=start->second * ((1<<HISTOGRAM_SHIFT) - (f.constant + 1 - (start->first<<HISTOGRAM_SHIFT)))/(1<<HISTOGRAM_SHIFT);
+            for (auto iter = start; iter != hist.end(); ++iter){
+                res+=iter->second;
+            }
+        }
+    }
+//    uint64_t realSize = calculateFilter(f, relations[f.filterColumn.relId].size);
+//    double pct = 1;
+//    if (realSize != 0){
+//        pct = 1.0 * res * HISTOGRAM_SAMPLE / realSize;
 //    }
 //    else{
-//        auto start = hist.lower_bound((f.constant+1)>>HISTOGRAM_SHIFT); 
-//        if (start 
-//        res+=start->second * ((1<<HISTOGRAM_SHIFT) - (f.constant - (start->first<<HISTOGRAM_SHIFT)+1))/(1<<HISTOGRAM_SHIFT);
-//        for (auto iter = start; iter != hist.end(); ++iter){
-//            res+=iter->second;
+//        if (res == 0){
+//            pct = 1;
+//        }
+//        else{
+//            pct = 1.0 * res * HISTOGRAM_SAMPLE;
 //        }
 //    }
-    return (double)res * HISTOGRAM_SAMPLE;
+//    fprintf(stderr, "%c %15lu %15lu pct: %10.5lf\n", f.comparison, realSize, res * HISTOGRAM_SAMPLE, pct);
+    return res * HISTOGRAM_SAMPLE * inputSize / relations[f.filterColumn.relId].size;
+}
+uint64_t Joiner::calculateFilter(FilterInfo &f, uint64_t inputSize)
+{
+    uint64_t res = 0;
+    uint64_t *column = relations[f.filterColumn.relId].columns[f.filterColumn.colId];
+    for (uint64_t i=0;i<relations[f.filterColumn.relId].size;++i){
+        switch(f.comparison){
+            case FilterInfo::Equal:
+                if (column[i] == f.constant) ++res;
+                break;
+            case FilterInfo::Less:
+                if (column[i] < f.constant) ++res;
+                break;
+            case FilterInfo::Greater:
+                if (column[i] > f.constant) ++res;
+                break;
+        }
+    }
+    return res * inputSize / relations[f.filterColumn.relId].size;
 }
