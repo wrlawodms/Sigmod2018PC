@@ -264,10 +264,14 @@ void Join::createAsyncTasks(boost::asio::io_service& ioService) {
     // cntPartition = CNT_PARTITIONS(right->getResultsSize(), partitionSize); 
 	cntPartition = CNT_PARTITIONS(left->getResultsSize(), partitionSize); 
     cntPartition = 1<<(Utils::log2(cntPartition-1)+1); // round up, power of 2 for hashing
+    	
 #ifdef VERBOSE
     cout << "Join("<< queryIndex << "," << operatorIndex <<") Right table size: " << right->getResultsSize() << " cnt_tuple: " << right->resultSize << " Left table size: " << left->getResultsSize() << " cnt_tuple: " << left->resultSize << " cntPartition: " << cntPartition << endl;
 #endif
-	/*
+    if (cntPartition < 32) 
+        cntPartition = 32;
+    
+    /*
     if (cntPartition == 1) {
         pendingSubjoin = 1;
         __sync_synchronize();
