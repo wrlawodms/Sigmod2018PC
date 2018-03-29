@@ -590,7 +590,6 @@ void Join::subJoinTask(boost::asio::io_service* ioService, int taskIndex, vector
             for (unsigned cId=0;cId<copyRightData.size();++cId)
                 localResults[relColId++].push_back(copyRightData[cId][i]);
         }
-        
     }
 #ifdef VERBOSE
         // cerr << "Join("<< queryIndex << "," << operatorIndex <<") subjoin finish. local result size: " << localResults[0].size() << endl;
@@ -616,6 +615,8 @@ sub_join_finish:
         free(partitionTable[0]);
         free(partitionTable[1]);
         finishAsyncRun(*ioService, true); 
+        left = nullptr;
+        right = nullptr;
     }
     //일단은 그냥 left로 building하자. 나중에 최적화된 방법으로 ㄲ
     
@@ -682,6 +683,7 @@ void SelfJoin::selfJoinTask(boost::asio::io_service* ioService, int taskIndex, u
             results[cId].fix();
         }
         finishAsyncRun(*ioService, true);
+        input = nullptr;
     }
 }
 //---------------------------------------------------------------------------
@@ -769,6 +771,7 @@ void Checksum::checksumTask(boost::asio::io_service* ioService, int taskIndex, u
     int remainder = __sync_sub_and_fetch(&pendingTask, 1);
     if (UNLIKELY(remainder == 0)) {
         finishAsyncRun(*ioService, false);
+        input = nullptr;
     }
      
 }
