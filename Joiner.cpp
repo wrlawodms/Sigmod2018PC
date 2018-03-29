@@ -22,7 +22,7 @@ void Joiner::printAsyncJoinInfo() {
 	__sync_synchronize();
 	for (int i=0; i<asyncJoins.size(); i++) {	
 		cout << "-----------------Query " << i << "---------------" << endl;
-		if (asyncJoins[i]->pendingAsyncOperator != 0) 
+		if (asyncJoins[i] != nullptr && asyncJoins[i]->pendingAsyncOperator != 0) 
 			asyncJoins[i]->printAsyncInfo();
 	}
 
@@ -123,9 +123,9 @@ void Joiner::join(QueryInfo& query, int queryIndex)
     left->setOperatorIndex(opIdx++);
     right->setOperatorIndex(opIdx++);
     root->setOperatorIndex(opIdx++);
-    left->setQeuryIndex(nextQueryIndex);
-    right->setQeuryIndex(nextQueryIndex);
-    root->setQeuryIndex(nextQueryIndex);
+    left->setQeuryIndex(queryIndex);
+    right->setQeuryIndex(queryIndex);
+    root->setQeuryIndex(queryIndex);
 #endif
     left->setParent(root);
     right->setParent(root); 
@@ -143,8 +143,8 @@ void Joiner::join(QueryInfo& query, int queryIndex)
 #ifdef VERBOSE
                 right->setOperatorIndex(opIdx++);
                 root->setOperatorIndex(opIdx++);
-                right->setQeuryIndex(nextQueryIndex);
-                root->setQeuryIndex(nextQueryIndex);
+                right->setQeuryIndex(queryIndex);
+                root->setQeuryIndex(queryIndex);
 #endif
                 left->setParent(root);
                 right->setParent(root);
@@ -156,8 +156,8 @@ void Joiner::join(QueryInfo& query, int queryIndex)
 #ifdef VERBOSE
                 left->setOperatorIndex(opIdx++);
                 root->setOperatorIndex(opIdx++);
-                left->setQeuryIndex(nextQueryIndex);
-                root->setQeuryIndex(nextQueryIndex);
+                left->setQeuryIndex(queryIndex);
+                root->setQeuryIndex(queryIndex);
 #endif
                 left->setParent(root);
                 right->setParent(root);
@@ -169,7 +169,7 @@ void Joiner::join(QueryInfo& query, int queryIndex)
                 root=make_shared<SelfJoin>(left,pInfo);
 #ifdef VERBOSE
                 root->setOperatorIndex(opIdx++);
-                root->setQeuryIndex(nextQueryIndex);
+                root->setQeuryIndex(queryIndex);
 #endif
                 left->setParent(root);
                 break;
@@ -198,5 +198,7 @@ void Joiner::createAsyncQueryTask(QueryInfo& query)
 	__sync_fetch_and_add(&pendingAsyncJoin, 1);
     asyncJoins.emplace_back();
     asyncResults.emplace_back();
-    ioService.post(bind(&Joiner::join, this, query, nextQueryIndex++)); 
+    
+    ioService.post(bind(&Joiner::join, this, query, nextQueryIndex)); 
+    __sync_fetch_and_add(&nextQueryIndex, 1);
 }

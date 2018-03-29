@@ -310,10 +310,10 @@ void Join::createAsyncTasks(boost::asio::io_service& ioService) {
             partition[1][i].emplace_back();
         }
 		tmpResults.emplace_back();
-		for (unsigned j=0; j<requestedColumns.size(); j++) {
-			tmpResults[i].emplace_back();
+		//for (unsigned j=0; j<requestedColumns.size(); j++) { // 여기서 하는 거랑 subjoin에서 하는 거랑속도차 엄청나네
+		//	tmpResults[i].emplace_back();
 //            tmpResults[i][tmpResults[i].size()-1].reserve(right->resultSize/cntPartition);
-		}
+		//}
     }
     
         // @TODO cachemiis may occur when a tuple is int the middle of partitioning point
@@ -455,6 +455,7 @@ void Join::histogramTask(boost::asio::io_service* ioService, int cntTask, int ta
 #endif
         uint64_t start = 0;
         uint64_t rest = taskRest[leftOrRight];
+        
         for (int i=0; i<cntTask; i++) {
             uint64_t length = taskLength[leftOrRight];
             if (rest) {
@@ -561,6 +562,7 @@ void Join::subJoinTask(boost::asio::io_service* ioService, int taskIndex, vector
     for (auto& info : requestedColumnsRight) {
         copyRightData.push_back(localRight[right->resolve(info)]);
     }
+
     // building
     //hashTable.reserve(limitLeft);
     hashTable.reserve(limitLeft*2);
@@ -568,10 +570,12 @@ void Join::subJoinTask(boost::asio::io_service* ioService, int taskIndex, vector
         hashTable.emplace(make_pair(leftKeyColumn[i],i));
     //    bloomFilter.insert(leftKeyColumn[i]);
     }
-    for (unsigned i=0; i<requestedColumns.size(); i++) {
+    
+    // probing
+    for (unsigned i=0; i < requestedColumns.size(); i++) {
         localResults.emplace_back();
     }
-    // probing
+    
     for (uint64_t i=0; i<limitRight; i++) {
         auto rightKey=rightKeyColumn[i];
         /*
@@ -583,16 +587,17 @@ void Join::subJoinTask(boost::asio::io_service* ioService, int taskIndex, vector
             unsigned relColId=0;
             for (unsigned cId=0;cId<copyLeftData.size();++cId)
                 localResults[relColId++].push_back(copyLeftData[cId][iter->second]);
-
             for (unsigned cId=0;cId<copyRightData.size();++cId)
                 localResults[relColId++].push_back(copyRightData[cId][i]);
         }
+        
     }
 #ifdef VERBOSE
-        //cout << "Join("<< queryIndex << "," << operatorIndex <<") subjoin finish. local result size: " << localResults[0].size() << endl;
+        // cerr << "Join("<< queryIndex << "," << operatorIndex <<") subjoin finish. local result size: " << localResults[0].size() << endl;
 #endif
-    if (localResults[0].size() < 0) 
+    if (localResults[0].size() == 0) { 
         goto sub_join_finish;
+    }
     for (unsigned i=0; i<requestedColumns.size(); i++)  {
 		results[i].addTuples(taskIndex, localResults[i].data(), localResults[i].size());
     }
@@ -776,6 +781,7 @@ void Checksum::createAsyncTasks(boost::asio::io_service& ioService) {
     for (auto& sInfo : colInfo) {
         checkSums.push_back(0);
     }
+    
     if (input->resultSize == 0) {
         finishAsyncRun(ioService, false);
         return;
