@@ -193,9 +193,11 @@ void Joiner::join(QueryInfo& query, int queryIndex)
 	checkSum->asyncRun(ioService, queryIndex); 
 }
 //---------------------------------------------------------------------------
-void Joiner::createAsyncQueryTask(QueryInfo& query)
+void Joiner::createAsyncQueryTask(string line)
 {
 	__sync_fetch_and_add(&pendingAsyncJoin, 1);
+    QueryInfo query;
+    query.parseQuery(line);
     asyncJoins.emplace_back();
     asyncResults.emplace_back();
     

@@ -43,7 +43,6 @@ int main(int argc, char* argv[]) {
 #ifdef MONITOR_ASYNC_JOIN
 	thread monitor(monitorAsyncJoinThread, &joiner);
 #endif
-    QueryInfo i;
     while (getline(cin, line)) {
         //if (line == "F") continue; // End of a batch
         if (line == "F") { // End of a batch
@@ -53,8 +52,8 @@ int main(int argc, char* argv[]) {
                 cout << result;
             continue;
         }
-        i.parseQuery(line);
-        joiner.createAsyncQueryTask(i);
+        //i.parseQuery(line);
+        joiner.createAsyncQueryTask(line);
         //cout << joiner.join(i);
     }
     //cerr << sum;

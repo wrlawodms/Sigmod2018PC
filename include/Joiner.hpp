@@ -57,7 +57,7 @@ class Joiner {
 	/// print asyncJoin infos
 	void printAsyncJoinInfo();
 
-    void createAsyncQueryTask(QueryInfo& query);
+    void createAsyncQueryTask(std::string line);
     ~Joiner() {
         ioService.stop();
         threadPool.join_all();
