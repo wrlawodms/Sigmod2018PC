@@ -111,13 +111,6 @@ void Joiner::join(QueryInfo& query, int queryIndex)
 {
     //cerr << query.dumpText() << endl;
     set<unsigned> usedRelations;
-//    for (auto &f : query.filters){
-//        Relation &r(relations[f.filterColumn.relId]);
-//        if (!r.sorted[f.filterColumn.colId].first &&
-//                __sync_bool_compare_and_swap(&r.sorted[f.filterColumn.colId].first, 0, 1)){
-//            ioService.post(bind(&Relation::loadIndex, &relations[f.filterColumn.relId], f.filterColumn.colId)); 
-//        }
-//    }
     uint64_t simulSize[4];
     for (unsigned i = 0; i < query.relationIds.size(); i++){
         simulSize[i] = relations[query.relationIds[i]].size;
@@ -235,25 +228,6 @@ void Joiner::createAsyncQueryTask(string line)
     asyncResults.emplace_back();
     ioService.post(bind(&Joiner::join, this, query, nextQueryIndex++)); 
 }
-void Joiner::loadIndexs()
-{
-    for (RelationId i=0;i<relations.size();++i){
-        for (unsigned j=0;j<relations[i].columns.size();++j){
-            ioService.post(bind(&Relation::loadIndex, &relations[i], j)); 
-        }
-    }
-//    while(1){
-//        bool pass = true;
-//        for (auto &r : relations){
-//            for (unsigned i=0;i<r.columns.size();++i){
-//                pass &= (r.sorted[i].first != 0);
-//            }
-//        }
-//        if (pass)
-//            break;
-//        usleep(1000000);
-//    }
-}
 uint64_t Joiner::estimatePredicateSelectivity(PredicateInfo &p, uint64_t leftSize, uint64_t rightSize)
 {
     uint64_t res = 0;
@@ -306,38 +280,5 @@ uint64_t Joiner::estimateFilterSelectivity(FilterInfo &f, uint64_t inputSize)
             }
         }
     }
-//    uint64_t realSize = calculateFilter(f, relations[f.filterColumn.relId].size);
-//    double pct = 1;
-//    if (realSize != 0){
-//        pct = 1.0 * res * HISTOGRAM_SAMPLE / realSize;
-//    }
-//    else{
-//        if (res == 0){
-//            pct = 1;
-//        }
-//        else{
-//            pct = 1.0 * res * HISTOGRAM_SAMPLE;
-//        }
-//    }
-//    fprintf(stderr, "%c %15lu %15lu pct: %10.5lf\n", f.comparison, realSize, res * HISTOGRAM_SAMPLE, pct);
     return res * HISTOGRAM_SAMPLE * inputSize / relations[f.filterColumn.relId].size;
-}
-uint64_t Joiner::calculateFilter(FilterInfo &f, uint64_t inputSize)
-{
-    uint64_t res = 0;
-    uint64_t *column = relations[f.filterColumn.relId].columns[f.filterColumn.colId];
-    for (uint64_t i=0;i<relations[f.filterColumn.relId].size;++i){
-        switch(f.comparison){
-            case FilterInfo::Equal:
-                if (column[i] == f.constant) ++res;
-                break;
-            case FilterInfo::Less:
-                if (column[i] < f.constant) ++res;
-                break;
-            case FilterInfo::Greater:
-                if (column[i] > f.constant) ++res;
-                break;
-        }
-    }
-    return res * inputSize / relations[f.filterColumn.relId].size;
 }

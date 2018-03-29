@@ -92,7 +92,7 @@ bool FilterScan::require(SelectInfo info)
     assert(info.colId<relation.columns.size());
     if (select2ResultColId.find(info)==select2ResultColId.end()) {
         // Add to results
-        inputData.push_back(columns[info.colId]);
+        inputData.push_back(relation.columns[info.colId]);
 //      tmpResults.emplace_back();
         unsigned colId=inputData.size()-1;
         select2ResultColId[info]=colId;
@@ -103,7 +103,7 @@ bool FilterScan::require(SelectInfo info)
 bool FilterScan::applyFilter(uint64_t i,FilterInfo& f)
 // Apply filter
 {
-    auto compareCol=columns[f.filterColumn.colId];
+    auto compareCol=relation.columns[f.filterColumn.colId];
     auto constant=f.constant;
     switch (f.comparison) {
         case FilterInfo::Comparison::Equal:
@@ -126,70 +126,27 @@ void FilterScan::asyncRun(boost::asio::io_service& ioService) {
 }
 
 //---------------------------------------------------------------------------
-pair<uint64_t, uint64_t> FilterScan::getBound() { // First location, Length
-    FilterInfo &f(filters[0]);
-    uint64_t *arr = relation.sorted[f.filterColumn.colId].second[f.filterColumn.colId];
-
-    if (f.comparison == FilterInfo::Equal){
-        auto bound = equal_range(arr,arr+relation.size, f.constant);
-        return pair<uint64_t,uint64_t>(bound.first-arr, bound.second-bound.first);
-    }
-    else if (f.comparison == FilterInfo::Less){
-        auto bound = lower_bound(arr,arr+relation.size, f.constant);
-        return pair<uint64_t,uint64_t>(0, bound-arr);
-    }
-    else{
-        auto bound = lower_bound(arr,arr+relation.size, f.constant+1);
-        return pair<uint64_t,uint64_t>(bound-arr, relation.size - (bound-arr));
-    }
-}
 void FilterScan::createAsyncTasks(boost::asio::io_service& ioService) {
     DECL_CNT;
 #ifdef VERBOSE
     cout << "FilterScan("<< queryIndex << "," << operatorIndex <<")::createAsyncTasks" << endl;
-#endif
-#ifdef ANALYZE
-    totUseIndex+=useSorted;
-    totNotUseIndex+=!useSorted;
 #endif
     int cntTask = THREAD_NUM;
     for (int i=0; i<inputData.size(); i++) {
 		results.emplace_back(cntTask);
         CNT;
     }
-    if (useSorted && filters.size() == 1){
-        for (unsigned cId=0;cId<inputData.size();++cId) {
-            results[cId].addTuples(0, inputData[cId]+bound.first, bound.second);
-            CNT;
-        }
-        for (unsigned cId=0;cId<inputData.size();++cId) {
-            for (int i=1; i<cntTask; i++) {
-                results[cId].addTuples(i, NULL, 0);
-                CNT;
-            }
-        }
-        resultSize += bound.second;
-
-        for (unsigned cId=0;cId<inputData.size();++cId) {
-            results[cId].fix();
-            CNT;
-        }
-        finishAsyncRun(ioService, true);
-        CNT_FILTERSCAN;
-        return;
-    }
     //const uint64_t partitionSize = L2_SIZE/2;
     //const unsigned taskNum = CNT_PARTITIONS(relation.size*relation.columns.size()*8, partitionSize);
-    uint64_t relSize = bound.second;
-    uint64_t taskLength = relSize/cntTask;
-    uint64_t rest = relSize%cntTask;
+    uint64_t taskLength = relation.size/cntTask;
+    uint64_t rest = relation.size%cntTask;
     
     if (taskLength < minTuplesPerTask) {
-        cntTask = relSize/minTuplesPerTask;
+        cntTask = relation.size/minTuplesPerTask;
         if (cntTask == 0)
             cntTask = 1;
-        taskLength = relSize/cntTask;
-        rest = relSize%cntTask;
+        taskLength = relation.size/cntTask;
+        rest = relation.size%cntTask;
     }
     
     pendingTask = cntTask;
@@ -204,7 +161,7 @@ void FilterScan::createAsyncTasks(boost::asio::io_service& ioService) {
 	
     __sync_synchronize(); 
     // uint64_t length = partitionSize/(relation.columns.size()*8); 
-    uint64_t start = bound.first;
+    uint64_t start = 0;
     for (unsigned i=0; i<cntTask; i++) {
         uint64_t length = taskLength;
         if (rest) {
@@ -227,8 +184,8 @@ void FilterScan::filterTask(boost::asio::io_service* ioService, int taskIndex, u
     }*/
     for (uint64_t i=start;i<start+length;++i) {
         bool pass=true;
-        for (unsigned j=useSorted;j<filters.size();++j){
-            if (!(pass&=applyFilter(i,filters[j])))
+        for (auto &f:filters){
+            if (!(pass&=applyFilter(i,f)))
                 break;
             CNT;
         }
