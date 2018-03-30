@@ -47,6 +47,11 @@ struct FilterInfo {
     Comparison comparison;
     /// Dump SQL
     std::string dumpSQL();
+    
+    /// Equality operator
+    inline bool operator==(const FilterInfo& o) const {
+        return filterColumn == o.filterColumn && constant == o.constant && comparison == o.comparison;
+    }
 
     /// The constructor
     FilterInfo(SelectInfo filterColumn,uint64_t constant,Comparison comparison) : filterColumn(filterColumn), constant(constant), comparison(comparison) {};
@@ -71,6 +76,11 @@ struct PredicateInfo {
     std::string dumpText();
     /// Dump SQL
     std::string dumpSQL();
+    
+    /// Equality operator
+    inline bool operator==(const PredicateInfo& o) const {
+        return o.left == left && o.right == right;
+    }
 
     /// The delimiter used in our text format
     static const char delimiter='&';
@@ -96,6 +106,8 @@ private:
     void parsePredicate(std::string& rawPredicate);
     /// Resolve bindings of relation ids
     void resolveRelationIds();
+    void addFilterPredicates();
+    void reorderPredicates();
 
 public:
     /// Parse relation ids <r1> <r2> ...

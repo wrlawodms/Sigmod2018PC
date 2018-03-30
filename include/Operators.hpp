@@ -122,7 +122,7 @@ class FilterScan : public Scan {
     /// for parallel
     int pendingTask = -1;
     
-    unsigned minTuplesPerTask = 100;
+    unsigned minTuplesPerTask = 1000;
 
     void filterTask(boost::asio::io_service* ioService, int taskIndex, uint64_t start, uint64_t length);
 public:
@@ -182,7 +182,7 @@ class Join : public Operator {
 
     uint64_t taskLength[2];
     uint64_t taskRest[2];
-    const unsigned minTuplesPerTask = 200; // minimum part table size
+    const unsigned minTuplesPerTask = 1000; // minimum part table size
 
     std::vector<std::vector<uint64_t*>> partition[2]; // just pointing partitionTable[], it is built after histogram, 각 파티션별 컬럼들의 위치를 포인팅  [LR][partition][column][tuple] P|C1sC2sC3s|P|C1sC2sC3s|...
     std::vector<std::vector<uint64_t>> histograms[2]; // [LR][taskIndex][partitionIndex], 각 파티션에 대한 벡터는 heap에 allocate되나? 안그럼 invalidate storㅇ이 일어날거 같은데
@@ -236,7 +236,7 @@ class SelfJoin : public Operator {
     /// The input data that has to be copied
     std::vector<Column<uint64_t>*> copyData;
     int pendingTask = -1;
-    unsigned minTuplesPerTask = 100;
+    unsigned minTuplesPerTask = 1000;
     void selfJoinTask(boost::asio::io_service* ioService, int taskIndex, uint64_t start, uint64_t length);
 
 public:
@@ -262,7 +262,7 @@ class Checksum : public Operator {
     int queryIndex;
     
     int pendingTask = -1;
-    unsigned minTuplesPerTask = 100;
+    unsigned minTuplesPerTask = 1000;
     void checksumTask(boost::asio::io_service* ioService, int taskIndex, uint64_t start, uint64_t length);
 
 public:

@@ -158,7 +158,8 @@ void FilterScan::filterTask(boost::asio::io_service* ioService, int taskIndex, u
     for (uint64_t i=start;i<start+length;++i) {
         bool pass=true;
         for (auto& f : filters) {
-            pass&=applyFilter(i,f);
+            if(!(pass=applyFilter(i,f)))
+                break;
         }
         if (pass) {
             for (unsigned cId=0;cId<inputData.size();++cId)
@@ -254,6 +255,8 @@ void Join::createAsyncTasks(boost::asio::io_service& ioService) {
     
     if (left->resultSize == 0) { // no reuslts
         finishAsyncRun(ioService, true);
+        left = nullptr;
+        right = nullptr;
         return;
     }
 
@@ -312,11 +315,6 @@ void Join::createAsyncTasks(boost::asio::io_service& ioService) {
         }
         
 		tmpResults.emplace_back();
-        /*
-		for (unsigned j=0; j<requestedColumns.size(); j++) {
-			tmpResults[i].emplace_back();
-		}
-        */
     }
     
         // @TODO cachemiis may occur when a tuple is int the middle of partitioning point
@@ -489,13 +487,14 @@ void Join::histogramTask(boost::asio::io_service* ioService, int cntTask, int ta
 #endif
         uint64_t start = 0;
         uint64_t rest = taskRest[leftOrRight];
+        
         for (int i=0; i<cntTask; i++) {
             uint64_t length = taskLength[leftOrRight];
             if (rest) {
                 length++;
                 rest--;
             }
-            ioService->post(bind(&Join::scatteringTask, this, ioService, i, leftOrRight, start, length)); // for left
+            ioService->post(bind(&Join::scatteringTask, this, ioService, i, leftOrRight, start, length));
             start += length;
         }
     }
@@ -544,17 +543,35 @@ void Join::scatteringTask(boost::asio::io_service* ioService, int taskIndex, int
         }
     }
     int remainder = __sync_sub_and_fetch(&pendingScattering[leftOrRight*CACHE_LINE_SIZE], 1);
-    if (UNLIKELY(remainder == 0)) { // gogo scattering
+    if (UNLIKELY(remainder == 0)) { 
         int remPart = __sync_sub_and_fetch(&pendingPartitioning, 1);
         if (remPart == 0) {
-            pendingBuilding = cntPartition;
+            vector<unsigned> subJoinTarget;
+            for (int i=0; i<cntPartition; i++) {
+                if (partitionLength[0][i] != 0 && partitionLength[1][i] != 0) {
+                    subJoinTarget.push_back(i);
+                }
+            }
+            if(subJoinTarget.size() == 0) { // left !=0 이지만 양쪽이 서로 다른 파티션으로만 나뉜경우 
+                for (unsigned cId=0;cId<requestedColumns.size();++cId) {
+                    results[cId].fix();
+                }
+                free(partitionTable[0]);
+                free(partitionTable[1]);
+                finishAsyncRun(*ioService, true); 
+                left = nullptr;
+                right = nullptr; 
+                return;         
+            }
+            pendingBuilding = subJoinTarget.size();
             __sync_synchronize();
 #ifdef VERBOSE
             cout << "Join("<< queryIndex << "," << operatorIndex <<") All partitioning are done. " << endl << "create buildingTasks " <<endl;
 #endif
-            int taskNum = cntPartition;
-            for (int i=0; i<taskNum; i++) {
-                ioService->post(bind(&Join::buildingTask, this, ioService, i, partition[0][i], partitionLength[0][i], partition[1][i], partitionLength[1][i]));
+            int taskNum = pendingBuilding;
+//            for (int i=0; i<taskNum; i++) {
+            for (auto& s : subJoinTarget) {
+                ioService->post(bind(&Join::buildingTask, this, ioService, s, partition[0][s], partitionLength[0][s], partition[1][s], partitionLength[1][s]));
                  // cout << "Join("<< queryIndex << "," << operatorIndex <<")" << " Part Size(L,R) (" << i << "): " << partitionLength[0][i] << ", " << partitionLength[1][i] << endl;
             }
         }
@@ -579,9 +596,7 @@ void Join::buildingTask(boost::asio::io_service* ioService, int taskIndex, vecto
     for (auto& info : requestedColumnsLeft) {
         copyLeftData.push_back(localLeft[left->resolve(info)]);
     }
-//    for (auto& info : requestedColumnsRight) {
-//        copyRightData.push_back(localRight[right->resolve(info)]);
-//    }
+
     // building
     //hashTable.reserve(limitLeft);
     hashTable.reserve(limitLeft*2);
@@ -647,17 +662,15 @@ void Join::probingTask(boost::asio::io_service* ioService, int partIndex, int ta
             unsigned relColId=0;
             for (unsigned cId=0;cId<copyLeftData.size();++cId)
                 localResults[relColId++].push_back(copyLeftData[cId][iter->second]);
-
             for (unsigned cId=0;cId<copyRightData.size();++cId)
                 localResults[relColId++].push_back(copyRightData[cId][i]);
         }
     }
 #ifdef VERBOSE
-        //cout << "Join("<< queryIndex << "," << operatorIndex <<") subjoin finish. local result size: " << localResults[0].size() << endl;
+        // cerr << "Join("<< queryIndex << "," << operatorIndex <<") subjoin finish. local result size: " << localResults[0].size() << endl;
 #endif
     if (localResults[0].size() == 0) 
         goto probing_finish;
-
     for (unsigned i=0; i<requestedColumns.size(); i++)  {
 		results[i].addTuples(resultIndex[partIndex]+taskIndex, localResults[i].data(), localResults[i].size());
     }
@@ -678,6 +691,8 @@ probing_finish:
         free(partitionTable[0]);
         free(partitionTable[1]);
         finishAsyncRun(*ioService, true); 
+        left = nullptr;
+        right = nullptr;
     }
     //일단은 그냥 left로 building하자. 나중에 최적화된 방법으로 ㄲ
      
@@ -744,6 +759,7 @@ void SelfJoin::selfJoinTask(boost::asio::io_service* ioService, int taskIndex, u
             results[cId].fix();
         }
         finishAsyncRun(*ioService, true);
+        input = nullptr;
     }
 }
 //---------------------------------------------------------------------------
@@ -831,6 +847,7 @@ void Checksum::checksumTask(boost::asio::io_service* ioService, int taskIndex, u
     int remainder = __sync_sub_and_fetch(&pendingTask, 1);
     if (UNLIKELY(remainder == 0)) {
         finishAsyncRun(*ioService, false);
+        input = nullptr;
     }
      
 }
@@ -843,6 +860,7 @@ void Checksum::createAsyncTasks(boost::asio::io_service& ioService) {
     for (auto& sInfo : colInfo) {
         checkSums.push_back(0);
     }
+    
     if (input->resultSize == 0) {
         finishAsyncRun(ioService, false);
         return;

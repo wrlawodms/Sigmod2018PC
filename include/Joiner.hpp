@@ -32,6 +32,19 @@ class Joiner {
     std::condition_variable cvAsync;
     std::mutex cvAsyncMt;
     
+    char* buf[THREAD_NUM];
+    int cntTouch;
+    void touchBuf(int i) {
+        buf[i] = (char*)malloc(2*1024*1024*1024ll);
+        /* 
+        for (int j=0; j <1*1024*1024*1024ll/4096; j++) 
+            buf[i][j*4096ll] = 1;
+          */
+        __sync_fetch_and_add(&cntTouch, 1);
+    }
+    void clearBuf(int i) {
+        free(buf[i]);
+    }
     public:
     Joiner(int threadNum) : work(ioService) {
         asyncResults.reserve(100);
@@ -40,7 +53,19 @@ class Joiner {
             threadPool.create_thread(
                 boost::bind(&boost::asio::io_service::run, &ioService)
                 );
-        }        
+        }
+        
+        cntTouch = 0;
+        for (int i=0; i<threadNum; i++) {
+            ioService.post(bind(&Joiner::touchBuf, this, i));
+        }
+        while (cntTouch < threadNum) {
+            __sync_synchronize();
+        }
+        for (int i=0; i<threadNum; i++) { 
+            ioService.post(bind(&Joiner::clearBuf, this, i));
+        }
+        
     }
     /// The relations that might be joined
     std::vector<Relation> relations;
@@ -57,7 +82,7 @@ class Joiner {
 	/// print asyncJoin infos
 	void printAsyncJoinInfo();
 
-    void createAsyncQueryTask(QueryInfo& query);
+    void createAsyncQueryTask(std::string line);
     ~Joiner() {
         ioService.stop();
         threadPool.join_all();

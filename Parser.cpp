@@ -2,6 +2,7 @@
 #include <iostream>
 #include <utility>
 #include <sstream>
+#include <list>
 #include "Parser.hpp"
 //---------------------------------------------------------------------------
 using namespace std;
@@ -67,10 +68,19 @@ void QueryInfo::parsePredicate(string& rawPredicate)
         filters.emplace_back(leftSelect,constant,FilterInfo::Comparison(compType));
     } else {
         auto rightSelect=parseRelColPair(relCols[1]);
-        if (leftSelect < rightSelect) { 
-            predicates.emplace_back(leftSelect, rightSelect);
+    
+        if (leftSelect < rightSelect) {
+            PredicateInfo p(leftSelect, rightSelect);
+            if (find(predicates.begin(), predicates.end(), p) == predicates.end())  
+                predicates.emplace_back(move(p));
+//            else 
+//                cerr << "redundant remove " << p.dumpText() << endl;
         } else {
-            predicates.emplace_back(rightSelect, leftSelect);
+            PredicateInfo p(rightSelect, leftSelect);
+            if (find(predicates.begin(), predicates.end(), p) == predicates.end())  
+                predicates.emplace_back(move(p));
+//            else 
+//                cerr << "redundant remove " << p.dumpText() << endl;
         }
     }
 }
@@ -82,6 +92,25 @@ void QueryInfo::parsePredicates(string& text)
     splitString(text,predicateStrings,'&');
     for (auto& rawPredicate : predicateStrings) {
         parsePredicate(rawPredicate);
+   }
+}
+//---------------------------------------------------------------------------
+void QueryInfo::addFilterPredicates() {
+    for (int i=0; i < filters.size(); i++) {
+        auto& f = filters[i];
+        for (auto& p : predicates) {
+            if (p.left == f.filterColumn) {
+                FilterInfo newF = f;
+                newF.filterColumn = p.right;
+                if (find(filters.begin(), filters.end(), newF) == filters.end())
+                    filters.push_back(move(newF));
+            } else if (p.right == f.filterColumn) {
+                FilterInfo newF = f;
+                newF.filterColumn = p.left;
+                if (find(filters.begin(), filters.end(), newF) == filters.end())
+                    filters.push_back(move(newF));
+            }
+        } 
     }
 }
 //---------------------------------------------------------------------------
@@ -119,6 +148,28 @@ void QueryInfo::resolveRelationIds()
     }
 }
 //---------------------------------------------------------------------------
+void QueryInfo::reorderPredicates() {
+    sort(predicates.begin(), predicates.end(), [&](const PredicateInfo& a, const PredicateInfo& b) -> bool {
+        int aScore = 0;
+        int bScore = 0;
+        for(auto& f : filters) {
+            if (f.filterColumn.binding == a.left.binding || f.filterColumn.binding == a.right.binding){
+                if (f.comparison == FilterInfo::Comparison::Equal)
+                    aScore += 1000;
+                else
+                    aScore += 1;
+            }
+            if (f.filterColumn.binding == b.left.binding || f.filterColumn.binding == b.right.binding){
+                if (f.comparison == FilterInfo::Comparison::Equal)
+                    bScore += 1000;
+                else
+                    bScore += 1;
+            }
+        }
+        return aScore > bScore;
+    });
+}
+//---------------------------------------------------------------------------
 void QueryInfo::parseQuery(string& rawQuery)
 // Parse query [RELATIONS]|[PREDICATES]|[SELECTS]
 {
@@ -128,6 +179,26 @@ void QueryInfo::parseQuery(string& rawQuery)
     assert(queryParts.size()==3);
     parseRelationIds(queryParts[0]);
     parsePredicates(queryParts[1]);
+    addFilterPredicates();
+    /*
+    cerr << "-------qurey join before----" << endl;
+    for (auto& pre : predicates) {
+        cerr << pre.dumpText() << endl;
+    }
+    */
+    reorderPredicates();
+    /*
+    cerr << "-------qurey join after----" << endl;
+    for (auto& pre : predicates) {
+        cerr << pre.dumpText() << endl;
+    }
+    */
+    /*
+    cerr << "-------filters----" << endl;
+    for (auto& f : filters) {
+        cerr << f.dumpText() << endl;
+    }
+    */
     parseSelections(queryParts[2]);
     resolveRelationIds();
 }
