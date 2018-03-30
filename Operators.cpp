@@ -130,9 +130,6 @@ void FilterScan::createAsyncTasks(boost::asio::io_service& ioService) {
     }
 	for (int i=0; i<cntTask; i++) {
 		tmpResults.emplace_back();
-		for (int j=0; j<inputData.size(); j++) {
-			tmpResults[i].emplace_back();
-		}
 	}
 	
     __sync_synchronize(); 
@@ -151,10 +148,16 @@ void FilterScan::createAsyncTasks(boost::asio::io_service& ioService) {
 //---------------------------------------------------------------------------
 void FilterScan::filterTask(boost::asio::io_service* ioService, int taskIndex, uint64_t start, uint64_t length) {
     vector<vector<uint64_t>>& localResults = tmpResults[taskIndex];
+    
+    for (int j=0; j<inputData.size(); j++) {
+        localResults.emplace_back();
+    }
     /*
     for (unsigned cId=0;cId<inputData.size();++cId) {
         localResults[cId].reserve(length);
     }*/
+
+    unsigned colSize = inputData.size();
     for (uint64_t i=start;i<start+length;++i) {
         bool pass=true;
         for (auto& f : filters) {
@@ -162,12 +165,12 @@ void FilterScan::filterTask(boost::asio::io_service* ioService, int taskIndex, u
                 break;
         }
         if (pass) {
-            for (unsigned cId=0;cId<inputData.size();++cId)
+            for (unsigned cId=0;cId<colSize;++cId)
                 localResults[cId].push_back(inputData[cId][i]);
         }
     }
 
-    for (unsigned cId=0;cId<inputData.size();++cId) {
+    for (unsigned cId=0;cId<colSize;++cId) {
 		results[cId].addTuples(taskIndex, localResults[cId].data(), localResults[cId].size());
     }
     //resultSize += localResults[0].size();
@@ -175,7 +178,7 @@ void FilterScan::filterTask(boost::asio::io_service* ioService, int taskIndex, u
 
     int remainder = __sync_sub_and_fetch(&pendingTask, 1);
     if (remainder == 0) {
-        for (unsigned cId=0;cId<inputData.size();++cId) {
+        for (unsigned cId=0;cId<colSize;++cId) {
             results[cId].fix();
         }
         finishAsyncRun(*ioService, true);
@@ -362,17 +365,9 @@ void Join::createAsyncTasks(boost::asio::io_service& ioService) {
 	histograms[1].reserve(cntTaskRight);
     for (int i=0; i<cntTaskLeft; i++) {
 		histograms[0].emplace_back();
-		histograms[0][i].reserve(CACHE_LINE_SIZE); // for preventing false sharing
-        for (uint64_t j=0; j<cntPartition; j++) {
-            histograms[0][i].emplace_back();
-        }
     }
     for (int i=0; i<cntTaskRight; i++) {
         histograms[1].emplace_back();
-		histograms[1][i].reserve(CACHE_LINE_SIZE);
-        for (uint64_t j=0; j<cntPartition; j++) {
-            histograms[1][i].emplace_back();
-        }
     }
     pendingMakingHistogram[0] = cntTaskLeft;
     pendingMakingHistogram[1*CACHE_LINE_SIZE] = cntTaskRight;
@@ -423,6 +418,10 @@ void Join::histogramTask(boost::asio::io_service* ioService, int cntTask, int ta
         keyColumn = inputData[rightColId];
     }
     */
+    histograms[leftOrRight][taskIndex].reserve(CACHE_LINE_SIZE); // for preventing false sharing
+    for (uint64_t j=0; j<cntPartition; j++) {
+        histograms[leftOrRight][taskIndex].emplace_back();
+    }
 	auto it = keyColumn.begin(start);
     for (uint64_t i=start,limit=start+length; i<limit; i++, ++it) {
         histograms[leftOrRight][taskIndex][RADIX_HASH(*it, cntPartition)]++; // cntPartition으로 나뉠 수 있도록하는 HASH
@@ -611,9 +610,6 @@ void Join::buildingTask(boost::asio::io_service* ioService, int taskIndex, vecto
 
     for (int i=0; i<cntTask; i++) {
         tmpResults[taskIndex].emplace_back();
-		for (unsigned j=0; j<requestedColumns.size(); j++) {
-			tmpResults[taskIndex][i].emplace_back();
-		}
     }
 
     __sync_fetch_and_add(&pendingProbing, cntTask);
@@ -639,9 +635,17 @@ void Join::probingTask(boost::asio::io_service* ioService, int partIndex, int ta
     uint64_t* rightKeyColumn = localRight[rightColId];
     vector<uint64_t*> copyLeftData, copyRightData;
     vector<vector<uint64_t>>& localResults = tmpResults[partIndex][taskIndex];
-
+    uint64_t limit = start+length;
+    unsigned leftColSize = requestedColumnsLeft.size();
+    unsigned rightColSize = requestedColumnsRight.size();
+    unsigned resultColSize = requestedColumns.size(); 
+    
     if (hashTable.size() == 0 || length == 0)
         goto probing_finish;
+    
+    for (unsigned j=0; j<requestedColumns.size(); j++) {
+        localResults.emplace_back();
+    }
 
     for (auto& info : requestedColumnsLeft) {
         copyLeftData.push_back(localLeft[left->resolve(info)]);
@@ -651,7 +655,7 @@ void Join::probingTask(boost::asio::io_service* ioService, int partIndex, int ta
     }
     
     // probing
-    for (uint64_t i=start; i<start+length; i++) {
+    for (uint64_t i=start; i<limit; i++) {
         auto rightKey=rightKeyColumn[i];
         /*
         if (!bloomFilter.contains(rightKey))
@@ -660,9 +664,9 @@ void Join::probingTask(boost::asio::io_service* ioService, int partIndex, int ta
         auto range=hashTable.equal_range(rightKey);
         for (auto iter=range.first;iter!=range.second;++iter) {
             unsigned relColId=0;
-            for (unsigned cId=0;cId<copyLeftData.size();++cId)
+            for (unsigned cId=0;cId<leftColSize;++cId)
                 localResults[relColId++].push_back(copyLeftData[cId][iter->second]);
-            for (unsigned cId=0;cId<copyRightData.size();++cId)
+            for (unsigned cId=0;cId<rightColSize;++cId)
                 localResults[relColId++].push_back(copyRightData[cId][i]);
         }
     }
@@ -671,7 +675,7 @@ void Join::probingTask(boost::asio::io_service* ioService, int partIndex, int ta
 #endif
     if (localResults[0].size() == 0) 
         goto probing_finish;
-    for (unsigned i=0; i<requestedColumns.size(); i++)  {
+    for (unsigned i=0; i<resultColSize; i++)  {
 		results[i].addTuples(resultIndex[partIndex]+taskIndex, localResults[i].data(), localResults[i].size());
     }
 	__sync_fetch_and_add(&resultSize, localResults[0].size());
@@ -731,31 +735,37 @@ void SelfJoin::selfJoinTask(boost::asio::io_service* ioService, int taskIndex, u
     auto rightColIt=inputData[rightColId].begin(start);
 
     vector<Column<uint64_t>::Iterator> colIt;
+
+    unsigned colSize = copyData.size();
     
-    for (unsigned i=0; i<copyData.size(); i++) {
+    for (int j=0; j<colSize; j++) {
+        localResults.emplace_back();
+    }
+    
+    for (unsigned i=0; i<colSize; i++) {
         colIt.push_back(copyData[i]->begin(start));
     }
     for (uint64_t i=start, limit=start+length;i<limit;++i) {
         if (*leftColIt==*rightColIt) {
-            for (unsigned cId=0;cId<copyData.size();++cId) {
+            for (unsigned cId=0;cId<colSize;++cId) {
                 localResults[cId].push_back(*(colIt[cId]));
             }
         }
         ++leftColIt;
         ++rightColIt;
-        for (unsigned i=0; i<copyData.size(); i++) {
+        for (unsigned i=0; i<colSize; i++) {
             ++colIt[i];
         }
     }
     //local results가 0일 경우??? ressult, tmp 초기화
-    for (int i=0; i<copyData.size(); i++) {
+    for (int i=0; i<colSize; i++) {
         results[i].addTuples(taskIndex, localResults[i].data(), localResults[i].size());
     }
 	__sync_fetch_and_add(&resultSize, localResults[0].size());
 
     int remainder = __sync_sub_and_fetch(&pendingTask, 1);
     if (UNLIKELY(remainder == 0)) {
-        for (unsigned cId=0;cId<copyData.size();++cId) {
+        for (unsigned cId=0;cId<colSize;++cId) {
             results[cId].fix();
         }
         finishAsyncRun(*ioService, true);
@@ -797,9 +807,6 @@ void SelfJoin::createAsyncTasks(boost::asio::io_service& ioService) {
 
     for (int i=0; i<cntTask; i++) {
         tmpResults.emplace_back();
-        for (int j=0; j<copyData.size(); j++) {
-            tmpResults[i].emplace_back();
-        }
     } 
     
     pendingTask = cntTask; 
