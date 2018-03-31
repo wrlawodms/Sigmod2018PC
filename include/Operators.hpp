@@ -23,9 +23,22 @@ class Joiner;
 //---------------------------------------------------------------------------
 namespace std {
 /// Simple hash function to enable use with unordered_map
+
 template<> struct hash<SelectInfo> {
     std::size_t operator()(SelectInfo const& s) const noexcept { return s.binding ^ (s.colId << 5); }
 };
+/*
+struct myHash {
+    std::size_t operator()(uint64_t const& s) const noexcept { 
+        uint64_t x = s;
+        x = ((x >> 32) ^ x) * 0x45d9f3b;
+        x = ((x >> 32) ^ x) * 0x45d9f3b;
+        x = (x >> 32) ^ x;
+        return x; 
+    }
+};
+*/
+
 };
 //---------------------------------------------------------------------------
 class Operator {
@@ -138,24 +151,34 @@ class Join : public Operator {
     /// The join predicate info
     PredicateInfo pInfo;
     /// tmpResults
-	std::vector<std::vector<std::vector<uint64_t>>> tmpResults; // [partition][col][tuple]
+	std::vector<std::vector<std::vector<std::vector<uint64_t>>>> tmpResults; // [partition][probingTaskIndex][col][tuple]
     /// Copy tuple to result
     void copy2Result(uint64_t leftId,uint64_t rightId);
     /// Create mapping for bindings
     void createMappingForBindings();
 
     char pad1[CACHE_LINE_SIZE];
-    int pendingMakingHistogram[2*CACHE_LINE_SIZE]; // = { -1, -1};
-    int pendingScattering[2*CACHE_LINE_SIZE];//  = {-1,-1};
+    int pendingMakingHistogram[2*CACHE_LINE_SIZE]; // bug
+    int pendingScattering[2*CACHE_LINE_SIZE];// bug, CACHE_LINE_SIZE/4 enough
     int pendingPartitioning = -1;
     char pad2[CACHE_LINE_SIZE];
-    int pendingSubjoin = -1;
+    int pendingBuilding = -1;
     char pad3[CACHE_LINE_SIZE];
+    int pendingProbing = 0;
+    char pad4[CACHE_LINE_SIZE];
 
     // sequentially aloocated address for partitions, will be freed after materializing the result
     uint64_t* partitionTable[2];
     const uint64_t partitionSize = L2_SIZE/16;
     uint64_t cntPartition;
+
+    // variablse per partitions
+    std::vector<unsigned> cntProbing; // determined in histogramTask
+    std::vector<uint64_t> lengthProbing; 
+    std::vector<unsigned> restProbing;
+    std::vector<unsigned> resultIndex;
+    // std::vector<std::unordered_multimap<uint64_t, uint64_t>> hashTables;
+
 
     uint64_t taskLength[2];
     uint64_t taskRest[2];
@@ -165,10 +188,14 @@ class Join : public Operator {
     std::vector<std::vector<uint64_t>> histograms[2]; // [LR][taskIndex][partitionIndex], 각 파티션에 대한 벡터는 heap에 allocate되나? 안그럼 invalidate storㅇ이 일어날거 같은데
     std::vector<uint64_t> partitionLength[2]; // #tuples per each partition
 
+    std::vector<std::unordered_multimap<uint64_t, uint64_t>*> hashTables; // for using thread local storage 
+
     void histogramTask(boost::asio::io_service* ioService, int cntTask, int taskIndex, int leftOrRight, uint64_t start, uint64_t length);
     void scatteringTask(boost::asio::io_service* ioService, int taskIndex, int leftOrRight, uint64_t start, uint64_t length); 
     // for cache, partition must be allocated sequentially 
-    void subJoinTask(boost::asio::io_service* ioService, int taskIndex, std::vector<uint64_t*> left, uint64_t leftLimit, std::vector<uint64_t*> right, uint64_t rightLimit);  
+    // void subJoinTask(boost::asio::io_service* ioService, int taskIndex, std::vector<uint64_t*> left, uint64_t leftLimit, std::vector<uint64_t*> right, uint64_t rightLimit);  
+    void buildingTask(boost::asio::io_service* ioService, int taskIndex, std::vector<uint64_t*> left, uint64_t leftLimit, std::vector<uint64_t*> right, uint64_t rightLimit);  
+    void probingTask(boost::asio::io_service* ioService, int partIndex, int taskIndex, std::vector<uint64_t*> left, std::vector<uint64_t*> right, uint64_t start, uint64_t length);  
     
     /// Columns that have to be materialized
     std::unordered_set<SelectInfo> requestedColumns;
