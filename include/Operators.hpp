@@ -16,6 +16,10 @@
 #include "Config.hpp"
 #include "Column.hpp"
 #include "bloom_filter.hpp"
+#include "highwayhash/highwayhash.h"
+#include "highwayhash/c_bindings.h"
+#include "highwayhash/highwayhash_target.h"
+#include "highwayhash/instruction_sets.h"
 //#include "Joiner.hpp"
 
 class Joiner;
@@ -27,17 +31,18 @@ namespace std {
 template<> struct hash<SelectInfo> {
     std::size_t operator()(SelectInfo const& s) const noexcept { return s.binding ^ (s.colId << 5); }
 };
-/*
+
 struct myHash {
-    std::size_t operator()(uint64_t const& s) const noexcept { 
-        uint64_t x = s;
-        x = ((x >> 32) ^ x) * 0x45d9f3b;
-        x = ((x >> 32) ^ x) * 0x45d9f3b;
-        x = (x >> 32) ^ x;
-        return x; 
+    static constexpr highwayhash::HHKey hhkey HH_ALIGNAS(32) = {1, 2, 3, 4};
+    //myHash(): state(key) {}
+    inline std::size_t operator()(uint64_t const& s) const noexcept { 
+        //return HighwayHash64(hhkey, (char*)&s, 8); 
+        highwayhash::HHResult64 result;  // or HHResult128 or HHResult256
+        highwayhash::InstructionSets::Run<highwayhash::HighwayHash>(hhkey, (char*)&s, 4, &result);
+        return result;
     }
 };
-*/
+
 
 };
 //---------------------------------------------------------------------------
@@ -188,7 +193,7 @@ class Join : public Operator {
     std::vector<std::vector<uint64_t>> histograms[2]; // [LR][taskIndex][partitionIndex], 각 파티션에 대한 벡터는 heap에 allocate되나? 안그럼 invalidate storㅇ이 일어날거 같은데
     std::vector<uint64_t> partitionLength[2]; // #tuples per each partition
 
-    std::vector<std::unordered_multimap<uint64_t, uint64_t>*> hashTables; // for using thread local storage 
+    std::vector<std::unordered_multimap<uint64_t, uint64_t, myHash>*> hashTables; // for using thread local storage 
 
     void histogramTask(boost::asio::io_service* ioService, int cntTask, int taskIndex, int leftOrRight, uint64_t start, uint64_t length);
     void scatteringTask(boost::asio::io_service* ioService, int taskIndex, int leftOrRight, uint64_t start, uint64_t length); 

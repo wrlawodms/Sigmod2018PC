@@ -10,7 +10,7 @@ set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -g")
 #set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -g -mavx2 -ftree-vectorize -march=native -fno-inline -m64") 
 # -fsanitize=address -Wall -fuse-ld=gold")
 
-#set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} -mavx -ftree-vectorize -march=native -m64")
+set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} -msse4.1 -ftree-vectorize -m64")
 #set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} -mavx -ftree-vectorize -march=native -m64 -S")
 #set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} -mavx -ftree-vectorize -march=native -fno-inline -m64")
 
@@ -32,7 +32,7 @@ endif()
 link_directories(${CMAKE_SOURCE_DIR}/lib)
 
 add_executable(Driver main.cpp)
-target_link_libraries(Driver database boost_system boost_thread tbb pthread m stdc++ dl jemalloc)
+target_link_libraries(Driver database boost_system boost_thread tbb pthread m stdc++ dl jemalloc highwayhash)
 
 # Interactive command line tool to translate our query format to SQL queries
 add_executable(Query2SQL Query2SQL.cpp)

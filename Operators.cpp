@@ -588,8 +588,8 @@ void Join::buildingTask(boost::asio::io_service* ioService, int taskIndex, vecto
     // Resolve the partitioned columns
     // unordered_multimap<uint64_t, uint64_t>& hashTable = hashTables[taskIndex];
 //    shared_ptr<unordered_multimap<uint64_t, uint64_t>> hashTable = make_shared<unordered_multimap<uint64_t, uint64_t>>();
-    hashTables[taskIndex] = new unordered_multimap<uint64_t, uint64_t>();
-    unordered_multimap<uint64_t, uint64_t>* hashTable = hashTables[taskIndex];
+    hashTables[taskIndex] = new unordered_multimap<uint64_t, uint64_t, myHash>();
+    unordered_multimap<uint64_t, uint64_t, myHash>* hashTable = hashTables[taskIndex];
     std::vector<uint64_t*> copyLeftData; //,copyRightData;
     //vector<vector<uint64_t>>& localResults = tmpResults[taskIndex];
     uint64_t* leftKeyColumn = localLeft[leftColId];
@@ -644,7 +644,7 @@ void Join::probingTask(boost::asio::io_service* ioService, int partIndex, int ta
     unsigned leftColSize = requestedColumnsLeft.size();
     unsigned rightColSize = requestedColumnsRight.size();
     unsigned resultColSize = requestedColumns.size(); 
-    unordered_multimap<uint64_t, uint64_t>* hashTable = hashTables[partIndex];
+    unordered_multimap<uint64_t, uint64_t, myHash>* hashTable = hashTables[partIndex];
     
     if (hashTable->size() == 0 || length == 0)
         goto probing_finish;
@@ -662,12 +662,12 @@ void Join::probingTask(boost::asio::io_service* ioService, int partIndex, int ta
     
     // probing
     for (uint64_t i=start; i<limit; i++) {
-        auto rightKey=rightKeyColumn[i];
+        //auto rightKey=rightKeyColumn[i];
         /*
         if (!bloomFilter.contains(rightKey))
             continue;
             */
-        auto range=hashTable->equal_range(rightKey);
+        auto range=hashTable->equal_range(rightKeyColumn[i]);
         for (auto iter=range.first;iter!=range.second;++iter) {
             unsigned relColId=0;
             for (unsigned cId=0;cId<leftColSize;++cId)
@@ -699,7 +699,7 @@ probing_finish:
             results[cId].fix();
         }
 
-        vector<unordered_multimap<uint64_t, uint64_t>*> gHashTables = move(hashTables);
+        vector<unordered_multimap<uint64_t, uint64_t, myHash>*> gHashTables = move(hashTables);
         unsigned gCntPartition = cntPartition;
         uint64_t* gPart0 = partitionTable[0];
         uint64_t* gPart1 = partitionTable[1];
