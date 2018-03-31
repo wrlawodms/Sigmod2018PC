@@ -188,12 +188,14 @@ class Join : public Operator {
     std::vector<std::vector<uint64_t>> histograms[2]; // [LR][taskIndex][partitionIndex], 각 파티션에 대한 벡터는 heap에 allocate되나? 안그럼 invalidate storㅇ이 일어날거 같은데
     std::vector<uint64_t> partitionLength[2]; // #tuples per each partition
 
+    std::vector<std::unordered_multimap<uint64_t, uint64_t>*> hashTables; // for using thread local storage 
+
     void histogramTask(boost::asio::io_service* ioService, int cntTask, int taskIndex, int leftOrRight, uint64_t start, uint64_t length);
     void scatteringTask(boost::asio::io_service* ioService, int taskIndex, int leftOrRight, uint64_t start, uint64_t length); 
     // for cache, partition must be allocated sequentially 
     // void subJoinTask(boost::asio::io_service* ioService, int taskIndex, std::vector<uint64_t*> left, uint64_t leftLimit, std::vector<uint64_t*> right, uint64_t rightLimit);  
     void buildingTask(boost::asio::io_service* ioService, int taskIndex, std::vector<uint64_t*> left, uint64_t leftLimit, std::vector<uint64_t*> right, uint64_t rightLimit);  
-    void probingTask(boost::asio::io_service* ioService, std::unordered_multimap<uint64_t, uint64_t>* hashTable, int partIndex, int taskIndex, std::vector<uint64_t*> left, std::vector<uint64_t*> right, uint64_t start, uint64_t length);  
+    void probingTask(boost::asio::io_service* ioService, int partIndex, int taskIndex, std::vector<uint64_t*> left, std::vector<uint64_t*> right, uint64_t start, uint64_t length);  
     
     /// Columns that have to be materialized
     std::unordered_set<SelectInfo> requestedColumns;

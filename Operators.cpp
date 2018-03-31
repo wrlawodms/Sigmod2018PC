@@ -258,8 +258,8 @@ void Join::createAsyncTasks(boost::asio::io_service& ioService) {
     
     if (left->resultSize == 0) { // no reuslts
         finishAsyncRun(ioService, true);
-        left = nullptr;
-        right = nullptr;
+        //left = nullptr;
+        //right = nullptr;
         return;
     }
 
@@ -558,16 +558,23 @@ void Join::scatteringTask(boost::asio::io_service* ioService, int taskIndex, int
                 free(partitionTable[0]);
                 free(partitionTable[1]);
                 finishAsyncRun(*ioService, true); 
-                left = nullptr;
-                right = nullptr; 
+                //left = nullptr;
+                //right = nullptr; 
                 return;         
             }
+            for (int i=0; i<cntPartition; i++) {
+                hashTables.emplace_back();
+            }
+            for (int i=0; i<cntPartition; i++) {
+                hashTables[i] = NULL;
+            }
             pendingBuilding = subJoinTarget.size();
+            unsigned taskNum = pendingBuilding;
             __sync_synchronize();
 #ifdef VERBOSE
             cout << "Join("<< queryIndex << "," << operatorIndex <<") All partitioning are done. " << endl << "create buildingTasks " <<endl;
 #endif
-            int taskNum = pendingBuilding;
+    
 //            for (int i=0; i<taskNum; i++) {
             for (auto& s : subJoinTarget) {
                 ioService->post(bind(&Join::buildingTask, this, ioService, s, partition[0][s], partitionLength[0][s], partition[1][s], partitionLength[1][s]));
@@ -580,7 +587,9 @@ void Join::scatteringTask(boost::asio::io_service* ioService, int taskIndex, int
 void Join::buildingTask(boost::asio::io_service* ioService, int taskIndex, vector<uint64_t*> localLeft, uint64_t limitLeft, vector<uint64_t*> localRight, uint64_t limitRight) {
     // Resolve the partitioned columns
     // unordered_multimap<uint64_t, uint64_t>& hashTable = hashTables[taskIndex];
-    unordered_multimap<uint64_t, uint64_t>* hashTable = new unordered_multimap<uint64_t, uint64_t>();
+//    shared_ptr<unordered_multimap<uint64_t, uint64_t>> hashTable = make_shared<unordered_multimap<uint64_t, uint64_t>>();
+    hashTables[taskIndex] = new unordered_multimap<uint64_t, uint64_t>();
+    unordered_multimap<uint64_t, uint64_t>* hashTable = hashTables[taskIndex];
     std::vector<uint64_t*> copyLeftData; //,copyRightData;
     //vector<vector<uint64_t>>& localResults = tmpResults[taskIndex];
     uint64_t* leftKeyColumn = localLeft[leftColId];
@@ -620,13 +629,13 @@ void Join::buildingTask(boost::asio::io_service* ioService, int taskIndex, vecto
             length++;
             rest--;
         }
-        ioService->post(bind(&Join::probingTask, this, ioService, hashTable, taskIndex, i, localLeft, localRight, start, length)); 
+        ioService->post(bind(&Join::probingTask, this, ioService, taskIndex, i, localLeft, localRight, start, length)); 
         start += length;
     }
 }
 
  
-void Join::probingTask(boost::asio::io_service* ioService, unordered_multimap<uint64_t, uint64_t>* hashTable, int partIndex, int taskIndex, vector<uint64_t*> localLeft, vector<uint64_t*> localRight, uint64_t start, uint64_t length) {
+void Join::probingTask(boost::asio::io_service* ioService, int partIndex, int taskIndex, vector<uint64_t*> localLeft, vector<uint64_t*> localRight, uint64_t start, uint64_t length) {
     // unordered_multimap<uint64_t, uint64_t>& hashTable = hashTables[partIndex];
     uint64_t* rightKeyColumn = localRight[rightColId];
     vector<uint64_t*> copyLeftData, copyRightData;
@@ -635,6 +644,7 @@ void Join::probingTask(boost::asio::io_service* ioService, unordered_multimap<ui
     unsigned leftColSize = requestedColumnsLeft.size();
     unsigned rightColSize = requestedColumnsRight.size();
     unsigned resultColSize = requestedColumns.size(); 
+    unordered_multimap<uint64_t, uint64_t>* hashTable = hashTables[partIndex];
     
     if (hashTable->size() == 0 || length == 0)
         goto probing_finish;
@@ -678,7 +688,6 @@ void Join::probingTask(boost::asio::io_service* ioService, unordered_multimap<ui
 //    resultSize += localResults[0].size();
 
 probing_finish:  
-    // delete hashTable;
     int remainder = __sync_sub_and_fetch(&pendingProbing, 1);
     // pendingProbing을 올리고 pendingBuilding을 낮추므로, 
     // pendingProbing이 0이고 pendingBuilding도 0이면 모두 끝난 것
@@ -689,11 +698,24 @@ probing_finish:
         for (unsigned cId=0;cId<requestedColumns.size();++cId) {
             results[cId].fix();
         }
-        free(partitionTable[0]);
-        free(partitionTable[1]);
+
+        vector<unordered_multimap<uint64_t, uint64_t>*> gHashTables = move(hashTables);
+        unsigned gCntPartition = cntPartition;
+        uint64_t* gPart0 = partitionTable[0];
+        uint64_t* gPart1 = partitionTable[1];
         finishAsyncRun(*ioService, true); 
-        left = nullptr;
-        right = nullptr;
+        
+        //left = nullptr;
+        //right = nullptr;
+        
+        free(gPart0);
+        free(gPart1);
+        
+        for(unsigned i=0; i<gCntPartition; i++) {
+            if(gHashTables[i] != NULL)
+                delete gHashTables[i];
+        }
+        
     }
     //일단은 그냥 left로 building하자. 나중에 최적화된 방법으로 ㄲ
      
@@ -766,7 +788,7 @@ void SelfJoin::selfJoinTask(boost::asio::io_service* ioService, int taskIndex, u
             results[cId].fix();
         }
         finishAsyncRun(*ioService, true);
-        input = nullptr;
+        //input = nullptr;
     }
 }
 //---------------------------------------------------------------------------
@@ -851,7 +873,7 @@ void Checksum::checksumTask(boost::asio::io_service* ioService, int taskIndex, u
     int remainder = __sync_sub_and_fetch(&pendingTask, 1);
     if (UNLIKELY(remainder == 0)) {
         finishAsyncRun(*ioService, false);
-        input = nullptr;
+        //input = nullptr;
     }
      
 }
