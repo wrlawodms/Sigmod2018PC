@@ -159,6 +159,8 @@ class Join : public Operator {
 
     char pad1[CACHE_LINE_SIZE];
     int pendingMakingHistogram[2*CACHE_LINE_SIZE]; // bug
+    int pendingHistogramTable = -1;
+    char pad5[CACHE_LINE_SIZE];
     int pendingScattering[2*CACHE_LINE_SIZE];// bug, CACHE_LINE_SIZE/4 enough
     int pendingPartitioning = -1;
     char pad2[CACHE_LINE_SIZE];
@@ -178,10 +180,12 @@ class Join : public Operator {
     std::vector<unsigned> restProbing;
     std::vector<unsigned> resultIndex;
     // std::vector<std::unordered_multimap<uint64_t, uint64_t>> hashTables;
+    
 
-
-    uint64_t taskLength[2];
-    uint64_t taskRest[2];
+    unsigned cntPartitioningTask[2];
+    uint64_t lengthPartitioningTask[2];
+    uint64_t restPartitioningTask[2];
+    
     const unsigned minTuplesPerTask = 1000; // minimum part table size
 
     std::vector<std::vector<uint64_t*>> partition[2]; // just pointing partitionTable[], it is built after histogram, 각 파티션별 컬럼들의 위치를 포인팅  [LR][partition][column][tuple] P|C1sC2sC3s|P|C1sC2sC3s|...
