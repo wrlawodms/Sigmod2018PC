@@ -252,7 +252,9 @@ uint64_t Joiner::estimatePredicateSelectivity(PredicateInfo &p, uint64_t leftSiz
     }
     //uint64_t buildSize = min(relations[p.left.relId].size, relations[p.right.relId].size);
     //return buildSize + res * HISTOGRAM_SAMPLE * HISTOGRAM_SAMPLE / (1 <<HISTOGRAM_SHIFT);
-    return leftSize + rightSize + res * HISTOGRAM_SAMPLE * HISTOGRAM_SAMPLE / (1 <<HISTOGRAM_SHIFT);
+    uint64_t simulSize = res* HISTOGRAM_SAMPLE * HISTOGRAM_SAMPLE / (1 <<HISTOGRAM_SHIFT);
+    uint64_t maxSize = relations[p.left.relId].size * relations[p.right.relId].size;
+    return leftSize + rightSize + leftSize * rightSize * simulSize / maxSize;
 }
 uint64_t Joiner::estimateFilterSelectivity(FilterInfo &f, uint64_t inputSize)
 {
