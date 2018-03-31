@@ -177,7 +177,7 @@ class Join : public Operator {
     std::vector<uint64_t> lengthProbing; 
     std::vector<unsigned> restProbing;
     std::vector<unsigned> resultIndex;
-    std::vector<std::unordered_multimap<uint64_t, uint64_t>> hashTables;
+    // std::vector<std::unordered_multimap<uint64_t, uint64_t>> hashTables;
 
 
     uint64_t taskLength[2];
@@ -193,7 +193,7 @@ class Join : public Operator {
     // for cache, partition must be allocated sequentially 
     // void subJoinTask(boost::asio::io_service* ioService, int taskIndex, std::vector<uint64_t*> left, uint64_t leftLimit, std::vector<uint64_t*> right, uint64_t rightLimit);  
     void buildingTask(boost::asio::io_service* ioService, int taskIndex, std::vector<uint64_t*> left, uint64_t leftLimit, std::vector<uint64_t*> right, uint64_t rightLimit);  
-    void probingTask(boost::asio::io_service* ioService, int partIndex, int taskIndex, std::vector<uint64_t*> left, std::vector<uint64_t*> right, uint64_t start, uint64_t length);  
+    void probingTask(boost::asio::io_service* ioService, std::unordered_multimap<uint64_t, uint64_t>* hashTable, int partIndex, int taskIndex, std::vector<uint64_t*> left, std::vector<uint64_t*> right, uint64_t start, uint64_t length);  
     
     /// Columns that have to be materialized
     std::unordered_set<SelectInfo> requestedColumns;

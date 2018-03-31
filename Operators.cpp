@@ -460,7 +460,7 @@ void Join::histogramTask(boost::asio::io_service* ioService, int cntTask, int ta
                 resultIndex.push_back(cntTask);
                 resultIndex[i+1] += resultIndex[i];
 
-                hashTables.emplace_back();
+                //hashTables.emplace_back();
             }
             unsigned probingResultSize = resultIndex[cntPartition];
             for (int i=0; i<requestedColumns.size(); i++) {
@@ -579,7 +579,8 @@ void Join::scatteringTask(boost::asio::io_service* ioService, int taskIndex, int
 
 void Join::buildingTask(boost::asio::io_service* ioService, int taskIndex, vector<uint64_t*> localLeft, uint64_t limitLeft, vector<uint64_t*> localRight, uint64_t limitRight) {
     // Resolve the partitioned columns
-    unordered_multimap<uint64_t, uint64_t>& hashTable = hashTables[taskIndex];
+    // unordered_multimap<uint64_t, uint64_t>& hashTable = hashTables[taskIndex];
+    unordered_multimap<uint64_t, uint64_t>* hashTable = new unordered_multimap<uint64_t, uint64_t>();
     std::vector<uint64_t*> copyLeftData; //,copyRightData;
     //vector<vector<uint64_t>>& localResults = tmpResults[taskIndex];
     uint64_t* leftKeyColumn = localLeft[leftColId];
@@ -587,20 +588,15 @@ void Join::buildingTask(boost::asio::io_service* ioService, int taskIndex, vecto
 
     //bloom_filter bloomFilter(bloomArgs);
 
-    /* @TODO 바로 끝낼 수 있게 하고 싶은데 
-    if (limitLeft == 0 || limitRight == 0) {
-        goto building_finish;
-    }*/ 
-
     for (auto& info : requestedColumnsLeft) {
         copyLeftData.push_back(localLeft[left->resolve(info)]);
     }
 
     // building
     //hashTable.reserve(limitLeft);
-    hashTable.reserve(limitLeft*2);
+    hashTable->reserve(limitLeft*2);
     for (uint64_t i=0; i<limitLeft; i++) {
-        hashTable.emplace(make_pair(leftKeyColumn[i],i));
+        hashTable->emplace(make_pair(leftKeyColumn[i],i));
     //    bloomFilter.insert(leftKeyColumn[i]);
     }
 
@@ -624,14 +620,14 @@ void Join::buildingTask(boost::asio::io_service* ioService, int taskIndex, vecto
             length++;
             rest--;
         }
-        ioService->post(bind(&Join::probingTask, this, ioService, taskIndex, i, localLeft, localRight, start, length)); 
+        ioService->post(bind(&Join::probingTask, this, ioService, hashTable, taskIndex, i, localLeft, localRight, start, length)); 
         start += length;
     }
 }
 
  
-void Join::probingTask(boost::asio::io_service* ioService, int partIndex, int taskIndex, vector<uint64_t*> localLeft, vector<uint64_t*> localRight, uint64_t start, uint64_t length) {
-    unordered_multimap<uint64_t, uint64_t>& hashTable = hashTables[partIndex];
+void Join::probingTask(boost::asio::io_service* ioService, unordered_multimap<uint64_t, uint64_t>* hashTable, int partIndex, int taskIndex, vector<uint64_t*> localLeft, vector<uint64_t*> localRight, uint64_t start, uint64_t length) {
+    // unordered_multimap<uint64_t, uint64_t>& hashTable = hashTables[partIndex];
     uint64_t* rightKeyColumn = localRight[rightColId];
     vector<uint64_t*> copyLeftData, copyRightData;
     vector<vector<uint64_t>>& localResults = tmpResults[partIndex][taskIndex];
@@ -640,7 +636,7 @@ void Join::probingTask(boost::asio::io_service* ioService, int partIndex, int ta
     unsigned rightColSize = requestedColumnsRight.size();
     unsigned resultColSize = requestedColumns.size(); 
     
-    if (hashTable.size() == 0 || length == 0)
+    if (hashTable->size() == 0 || length == 0)
         goto probing_finish;
     
     for (unsigned j=0; j<requestedColumns.size(); j++) {
@@ -661,7 +657,7 @@ void Join::probingTask(boost::asio::io_service* ioService, int partIndex, int ta
         if (!bloomFilter.contains(rightKey))
             continue;
             */
-        auto range=hashTable.equal_range(rightKey);
+        auto range=hashTable->equal_range(rightKey);
         for (auto iter=range.first;iter!=range.second;++iter) {
             unsigned relColId=0;
             for (unsigned cId=0;cId<leftColSize;++cId)
@@ -682,6 +678,7 @@ void Join::probingTask(boost::asio::io_service* ioService, int partIndex, int ta
 //    resultSize += localResults[0].size();
 
 probing_finish:  
+    // delete hashTable;
     int remainder = __sync_sub_and_fetch(&pendingProbing, 1);
     // pendingProbing을 올리고 pendingBuilding을 낮추므로, 
     // pendingProbing이 0이고 pendingBuilding도 0이면 모두 끝난 것
