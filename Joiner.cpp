@@ -8,6 +8,16 @@
 #include <sstream>
 #include <vector>
 #include "Parser.hpp"
+#ifdef ANALYZE
+extern map<unsigned, unsigned> numRelation;
+extern map<unsigned, unsigned> numPredicate;
+extern map<unsigned, unsigned> numFilter;
+extern map<SelectInfo, unsigned, SelectInfoComparer> numFilterColumn;
+extern map<SelectInfo, unsigned, SelectInfoComparer> numPredicateColumn;
+extern map<unsigned, unsigned> numFilterPerRelation;
+extern uint64_t numJoin;
+extern uint64_t numSelfJoin;
+#endif
 //#include "Operators.hpp"
 //---------------------------------------------------------------------------
 using namespace std;
@@ -224,6 +234,27 @@ void Joiner::createAsyncQueryTask(string line)
 	__sync_fetch_and_add(&pendingAsyncJoin, 1);
     QueryInfo query;
     query.parseQuery(line);
+#ifdef ANALYZE
+    ++numRelation[query.relationIds.size()];
+    ++numPredicate[query.predicates.size()];
+    ++numFilter[query.filters.size()];
+    for (auto &p:query.predicates){
+        ++numPredicateColumn[p.left];
+        ++numPredicateColumn[p.right];
+    }
+    for (auto &f:query.filters){
+        ++numFilterColumn[f.filterColumn];
+    }
+    for (unsigned binding=0;binding<query.relationIds.size();++binding){
+        unsigned cnt=0;
+        for (auto &f:query.filters){
+            cnt+=(binding == f.filterColumn.binding);
+        }
+        ++numFilterPerRelation[cnt];
+    }
+    numJoin+=query.relationIds.size()-1;
+    numSelfJoin+=query.predicates.size()-(query.relationIds.size()-1);
+#endif
     asyncJoins.emplace_back();
     asyncResults.emplace_back();
     

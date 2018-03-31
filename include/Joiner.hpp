@@ -14,6 +14,13 @@
 
 class Operator;
 //class Checksum;
+#ifdef ANALYZE
+struct SelectInfoComparer{
+    bool operator()(const SelectInfo &a, const SelectInfo &b){
+        return a.relId < b.relId || (a.relId == b.relId && a.colId < b.colId);
+    }
+};
+#endif
 
 class Joiner {
     friend Checksum;

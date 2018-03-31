@@ -685,6 +685,7 @@ void Join::buildingTask(boost::asio::io_service* ioService, int taskIndex, vecto
         ioService->post(bind(&Join::probingTask, this, ioService, taskIndex, i, localLeft, localRight, start, length)); 
         start += length;
     }
+    CNT_JOIN;
 }
 
  
