@@ -708,13 +708,15 @@ probing_finish:
         //left = nullptr;
         //right = nullptr;
         
-        free(gPart0);
-        free(gPart1);
+        //free(gPart0);
+        //free(gPart1);
         
+        /*
         for(unsigned i=0; i<gCntPartition; i++) {
             if(gHashTables[i] != NULL)
                 delete gHashTables[i];
         }
+        */
         
     }
     //일단은 그냥 left로 building하자. 나중에 최적화된 방법으로 ㄲ
