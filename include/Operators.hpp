@@ -168,7 +168,7 @@ class Join : public Operator {
     char pad4[CACHE_LINE_SIZE];
 
     // sequentially aloocated address for partitions, will be freed after materializing the result
-    uint64_t* partitionTable[2];
+    uint64_t* partitionTable[2] = {NULL, NULL};
     const uint64_t partitionSize = L2_SIZE/16;
     uint64_t cntPartition;
 
@@ -213,6 +213,17 @@ class Join : public Operator {
 public:
     /// The constructor
     Join(std::shared_ptr<Operator>& left,std::shared_ptr<Operator>& right,PredicateInfo pInfo) : left(left), right(right), pInfo(pInfo) {};
+    ~Join() {
+
+        free(partitionTable[0]);
+        free(partitionTable[1]);
+        if (!hashTables.size())
+            return;
+        for (unsigned i=0; i<cntPartition; i++) {
+            if(hashTables[i] != NULL)
+                delete hashTables[i];
+        }
+    }
     /// Require a column and add it to results
     bool require(SelectInfo info) override;
     /// AsyncRun
