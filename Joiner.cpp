@@ -126,14 +126,14 @@ void Joiner::join(QueryInfo& query, int queryIndex)
         simulSize[i] = relations[query.relationIds[i]].size;
     }
     for (auto &f : query.filters){
-        simulSize[f.filterColumn.binding] = estimateFilterSelectivity(f, simulSize[f.filterColumn.binding]);
+        simulSize[f.filterColumn.binding] = estimateFilterResultSize(f, simulSize[f.filterColumn.binding]);
     }
     for (auto &p : query.predicates){
-        p.sel = estimatePredicateSelectivity(p, simulSize[p.left.binding], simulSize[p.right.binding]);
+        p.cost = estimatePredicateCost(p, simulSize[p.left.binding], simulSize[p.right.binding]);
     }
     struct PredicateComparer{
         bool operator()(const PredicateInfo &a, const PredicateInfo &b){
-            return a.sel < b.sel;
+            return a.cost < b.cost;
         }
     } predicateComparer;
     sort(query.predicates.begin(), query.predicates.end(), predicateComparer);
@@ -261,7 +261,7 @@ void Joiner::createAsyncQueryTask(string line)
     ioService.post(bind(&Joiner::join, this, query, nextQueryIndex)); 
     __sync_fetch_and_add(&nextQueryIndex, 1);
 }
-uint64_t Joiner::estimatePredicateSelectivity(PredicateInfo &p, uint64_t leftSize, uint64_t rightSize)
+uint64_t Joiner::estimatePredicateCost(PredicateInfo &p, uint64_t leftSize, uint64_t rightSize)
 {
     uint64_t res = 0;
     map<uint64_t, uint64_t> &left(relations[p.left.relId].histograms[p.left.colId]);
@@ -287,7 +287,7 @@ uint64_t Joiner::estimatePredicateSelectivity(PredicateInfo &p, uint64_t leftSiz
     uint64_t maxSize = relations[p.left.relId].size * relations[p.right.relId].size;
     return leftSize + rightSize + leftSize * rightSize * simulSize / maxSize;
 }
-uint64_t Joiner::estimateFilterSelectivity(FilterInfo &f, uint64_t inputSize)
+uint64_t Joiner::estimateFilterResultSize(FilterInfo &f, uint64_t inputSize)
 {
     uint64_t res = 0;
     map<uint64_t, uint64_t> &hist(relations[f.filterColumn.relId].histograms[f.filterColumn.colId]);

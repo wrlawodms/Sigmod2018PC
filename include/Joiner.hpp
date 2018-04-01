@@ -88,8 +88,8 @@ class Joiner {
     std::vector<std::string> getAsyncJoinResults();
 	/// print asyncJoin infos
 	void printAsyncJoinInfo();
-    uint64_t estimatePredicateSelectivity(PredicateInfo &p, uint64_t leftSize, uint64_t rightSize);
-    uint64_t estimateFilterSelectivity(FilterInfo &f, uint64_t inputSize);
+    uint64_t estimatePredicateCost(PredicateInfo &p, uint64_t leftSize, uint64_t rightSize);
+    uint64_t estimateFilterResultSize(FilterInfo &f, uint64_t inputSize);
 
     void createAsyncQueryTask(std::string line);
     ~Joiner() {
