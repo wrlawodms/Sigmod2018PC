@@ -139,82 +139,44 @@ void Joiner::join(QueryInfo& query, int queryIndex)
     sort(query.predicates.begin(), query.predicates.end(), predicateComparer);
     // We always start with the first join predicate and append the other joins to it (--> left-deep join trees)
     // You might want to choose a smarter join ordering ...
-    auto& firstJoin=query.predicates[0];
-    auto left=addScan(usedRelations,firstJoin.left,query);
-    auto right=addScan(usedRelations,firstJoin.right,query);
-    
-    shared_ptr<Operator> root=make_shared<Join>(left, right, firstJoin);
+    shared_ptr<Operator> root[4];
 #ifdef VERBOSE
     unsigned opIdx = 0;
-    left->setOperatorIndex(opIdx++);
-    right->setOperatorIndex(opIdx++);
-    root->setOperatorIndex(opIdx++);
-    left->setQeuryIndex(queryIndex);
-    right->setQeuryIndex(queryIndex);
-    root->setQeuryIndex(queryIndex);
 #endif
-    left->setParent(root);
-    right->setParent(root); 
-    unsigned selfJoinCheck = query.predicates.size();
-
-    for (unsigned i=1;i<query.predicates.size();++i) {
+    for (unsigned i=0;i<query.predicates.size();++i) {
         auto& pInfo=query.predicates[i];
-        assert(pInfo.left < pInfo.right); 
         auto& leftInfo=pInfo.left; auto& rightInfo=pInfo.right;
-        shared_ptr<Operator> left, right;
-        auto res = analyzeInputOfJoin(usedRelations,leftInfo,rightInfo);
-        if (i < selfJoinCheck){
-            if (res == QueryGraphProvides::Both){
-                // All relations of this join are already used somewhere else in the query.
-                // Thus, we have either a cycle in our join graph or more than one join predicate per join.
-                left = root;
-                root=make_shared<SelfJoin>(left,pInfo);
+        if (root[leftInfo.binding] == nullptr){
+            root[leftInfo.binding] = addScan(leftInfo,query);
 #ifdef VERBOSE
-                root->setOperatorIndex(opIdx++);
-                root->setQeuryIndex(nextQueryIndex);
+            left->setOperatorIndex(opIdx++);
 #endif
-                left->setParent(root);
-            }
-            else{
-                query.predicates.push_back(pInfo);
-            }
-            continue;
         }
-        switch(res) {
-            case QueryGraphProvides::Left:
-                left=root;
-                right=addScan(usedRelations,rightInfo,query);
-                root=make_shared<Join>(left, right,pInfo);
+        if (root[rightInfo.binding] == nullptr){
+            root[rightInfo.binding] = addScan(rightInfo,query);
 #ifdef VERBOSE
-                right->setOperatorIndex(opIdx++);
-                root->setOperatorIndex(opIdx++);
-                right->setQeuryIndex(queryIndex);
-                root->setQeuryIndex(queryIndex);
+            right->setOperatorIndex(opIdx++);
 #endif
-                left->setParent(root);
-                right->setParent(root);
-                selfJoinCheck = query.predicates.size(); 
-                break;
-            case QueryGraphProvides::Right:
-                left=addScan(usedRelations,leftInfo,query);
-                right=root;
-                root=make_shared<Join>(left,right,pInfo);
+        }
+        shared_ptr<Operator> left(root[leftInfo.binding]), right(root[rightInfo.binding]);
+        shared_ptr<Operator> res;
+        if (left != right){
+            res=make_shared<Join>(left, right,pInfo);
+            left->setParent(res);
+            right->setParent(res); 
+        }
+        else{
+            res=make_shared<SelfJoin>(left,pInfo);
+            left->setParent(res);
+        }
 #ifdef VERBOSE
-                left->setOperatorIndex(opIdx++);
-                root->setOperatorIndex(opIdx++);
-                left->setQeuryIndex(queryIndex);
-                root->setQeuryIndex(queryIndex);
+        res->setOperatorIndex(opIdx++);
 #endif
-                left->setParent(root);
-                right->setParent(root);
-                selfJoinCheck = query.predicates.size(); 
-                break;
-            case QueryGraphProvides::None:
-                // Process this predicate later when we can connect it to the other joins
-                // We never have cross products
-                query.predicates.push_back(pInfo);
-                break;
-        };
+        for (int i = 0; i < 4; ++i){
+            if (root[i] == left || root[i] == right){
+                root[i] = res;
+            }
+        }
     }
 
     std::shared_ptr<Checksum> checkSum = std::make_shared<Checksum>(*this, root, query.selections);
