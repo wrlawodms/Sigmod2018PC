@@ -604,8 +604,8 @@ void Join::scatteringTask(boost::asio::io_service* ioService, int taskIndex, int
                 for (unsigned cId=0;cId<requestedColumns.size();++cId) {
                     results[cId].fix();
                 }
-                free(partitionTable[0]);
-                free(partitionTable[1]);
+//                free(partitionTable[0]);
+//                free(partitionTable[1]);
                 finishAsyncRun(*ioService, true); 
                 //left = nullptr;
                 //right = nullptr; 
@@ -755,11 +755,12 @@ probing_finish:
         for (unsigned cId=0;cId<requestedColumns.size();++cId) {
             results[cId].fix();
         }
-
+/*
         vector<unordered_multimap<uint64_t, uint64_t>*> gHashTables = move(hashTables);
         unsigned gCntPartition = cntPartition;
         uint64_t* gPart0 = partitionTable[0];
         uint64_t* gPart1 = partitionTable[1];
+ */
         finishAsyncRun(*ioService, true); 
         
         //left = nullptr;

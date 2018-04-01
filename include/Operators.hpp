@@ -219,10 +219,12 @@ public:
         free(partitionTable[1]);
         if (!hashTables.size())
             return;
+/*
         for (unsigned i=0; i<cntPartition; i++) {
             if(hashTables[i] != NULL)
                 delete hashTables[i];
         }
+        */
     }
     /// Require a column and add it to results
     bool require(SelectInfo info) override;
