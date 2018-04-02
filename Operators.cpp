@@ -676,7 +676,7 @@ void Join::buildingTask(boost::asio::io_service* ioService, int taskIndex, vecto
     //cerr << " PendingProbing: " << pendingProbing;
     //cerr << " PendingBuilding: " << pendingBuilding << endl;
     uint64_t start = 0;
-    for (int i=0; i<cntTask; i++) {
+    for (int i=0; i<cntTask-1; i++) {
         uint64_t length = taskLength;
         if (rest) {
             length++;
@@ -685,7 +685,12 @@ void Join::buildingTask(boost::asio::io_service* ioService, int taskIndex, vecto
         ioService->post(bind(&Join::probingTask, this, ioService, taskIndex, i, localLeft, localRight, start, length)); 
         start += length;
     }
+    uint64_t length = taskLength; 
+    if (rest) {
+        length++;
+    }
     CNT_JOIN;
+    probingTask(ioService, taskIndex, cntTask-1, localLeft, localRight, start, length); 
 }
 
  
