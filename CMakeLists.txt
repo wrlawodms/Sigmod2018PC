@@ -18,7 +18,7 @@ set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -g")
 include_directories(include)
 
 
-add_library(database Relation.cpp Operators.cpp Parser.cpp Utils.cpp Joiner.cpp)
+add_library(database Relation.cpp Operators.cpp Parser.cpp Utils.cpp Joiner.cpp MemoryPool.cpp buddy.cpp)
 target_include_directories(database PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
     $<INSTALL_INTERFACE:include>
