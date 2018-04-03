@@ -3,7 +3,10 @@
 //---------------------------------------------------------------------------
 using namespace std;
 //---------------------------------------------------------------------------
+MemoryPool** localMemPool;
+thread_local int tid = 0;
 //---------------------------------------------------------------------------
+int nextTid = 0;
 static void createColumn(vector<uint64_t*>& columns,uint64_t numTuples)
 // Create a dummy column
 {

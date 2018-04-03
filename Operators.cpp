@@ -334,14 +334,17 @@ void Join::createAsyncTasks(boost::asio::io_service& ioService) {
     pendingPartitioning = 2;
 //    partitionTable[0] = (uint64_t*)malloc(left->getResultsSize());
 //    partitionTable[1] = (uint64_t*)malloc(right->getResultsSize());
-    partitionTable[0] = (uint64_t*)aligned_alloc(CACHE_LINE_SIZE, left->getResultsSize());
-    partitionTable[1] = (uint64_t*)aligned_alloc(CACHE_LINE_SIZE, right->getResultsSize());
-
+//    partitionTable[0] = (uint64_t*)aligned_alloc(CACHE_LINE_SIZE, left->getResultsSize());
+//    partitionTable[1] = (uint64_t*)aligned_alloc(CACHE_LINE_SIZE, right->getResultsSize());
+    partitionTable[0] = (uint64_t*)localMemPool[tid]->alloc(left->getResultsSize());
+    partitionTable[1] = (uint64_t*)localMemPool[tid]->alloc(right->getResultsSize());
+    allocTid = tid; 
+/*
     if (left->getResultsSize() > 2*1024*1024) 
         madvise(partitionTable[0], left->getResultsSize(), MADV_HUGEPAGE);    
     if (right->getResultsSize() > 2*1024*1024) 
         madvise(partitionTable[1], right->getResultsSize(), MADV_HUGEPAGE);    
-    
+  */  
     for (uint64_t i=0; i<cntPartition; i++) {
         partition[0].emplace_back();
         partition[1].emplace_back();
@@ -604,8 +607,13 @@ void Join::scatteringTask(boost::asio::io_service* ioService, int taskIndex, int
                 for (unsigned cId=0;cId<requestedColumns.size();++cId) {
                     results[cId].fix();
                 }
-//                free(partitionTable[0]);
-//                free(partitionTable[1]);
+                /*
+                if (allocTid == 10) {
+                    std::cerr << "Mempool(" << allocTid << ") free requested by " << tid << " addr: " << partitionTable[0] << ", " << partitionTable[1] << std::endl;
+                }
+                */
+                localMemPool[allocTid]->requestFree(partitionTable[0]);
+                localMemPool[allocTid]->requestFree(partitionTable[1]);
                 finishAsyncRun(*ioService, true); 
                 //left = nullptr;
                 //right = nullptr; 
@@ -766,6 +774,13 @@ probing_finish:
         uint64_t* gPart0 = partitionTable[0];
         uint64_t* gPart1 = partitionTable[1];
  */
+        /*
+        if (allocTid == 10) {
+            std::cerr << "Mempool(" << allocTid << ") free requested by " << tid << " addr: " <<partitionTable[0] << ", " << partitionTable[1] << endl;
+        }
+        */
+        localMemPool[allocTid]->requestFree(partitionTable[0]);
+        localMemPool[allocTid]->requestFree(partitionTable[1]);
         finishAsyncRun(*ioService, true); 
         
         //left = nullptr;

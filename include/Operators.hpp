@@ -169,8 +169,10 @@ class Join : public Operator {
 
     // sequentially aloocated address for partitions, will be freed after materializing the result
     uint64_t* partitionTable[2] = {NULL, NULL};
+    int allocTid = -1;
     const uint64_t partitionSize = L2_SIZE/16;
     uint64_t cntPartition;
+
 
     // variablse per partitions
     std::vector<unsigned> cntProbing; // determined in histogramTask
@@ -215,8 +217,8 @@ public:
     Join(std::shared_ptr<Operator>& left,std::shared_ptr<Operator>& right,PredicateInfo pInfo) : left(left), right(right), pInfo(pInfo) {};
     ~Join() {
 
-        free(partitionTable[0]);
-        free(partitionTable[1]);
+//        free(partitionTable[0]);
+//        free(partitionTable[1]);
         if (!hashTables.size())
             return;
 /*
