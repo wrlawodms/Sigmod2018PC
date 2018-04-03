@@ -87,6 +87,7 @@ public:
                     break;
                 }
 			}
+            __builtin_prefetch(&col.tuples[localIndex][localOffset], 0, 1);
 			return *this;
 		}
 				
