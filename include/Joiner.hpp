@@ -45,7 +45,7 @@ class Joiner {
     
     int pendingAsyncJoin = 0;
     int nextQueryIndex = 0;
-    std::unordered_map<PredicateInfo, double, PredicateInfoHash, PredicateInfoEqual> predSels;
+    //std::unordered_map<PredicateInfo, double, PredicateInfoHash, PredicateInfoEqual> predSels;
     std::vector<std::vector<uint64_t>> asyncResults; //checksums
     std::vector<std::shared_ptr<Checksum>> asyncJoins;
     std::condition_variable cvAsync;
