@@ -40,7 +40,7 @@ int main(int argc, char* argv[]) {
         if (line == "Done") break;
         joiner.addRelation(line.c_str());
     }
-    //joiner.loadIndexs();
+    joiner.loadHistograms();
 #ifdef ANALYZE
     cerr << "Prepare Time : " << endTimer(t) << endl;
 #endif
@@ -86,8 +86,8 @@ int main(int argc, char* argv[]) {
     extern uint64_t totJoin;
     extern uint64_t totSelfJoin;
     extern uint64_t totChecksum;
-    extern uint64_t totUseIndex;
-    extern uint64_t totNotUseIndex;
+//    extern uint64_t totUseIndex;
+//    extern uint64_t totNotUseIndex;
 #define PRINT(X) do{\
     fprintf(stderr, "%20s : %20lu\n", #X, X);\
 }while(0)
@@ -97,8 +97,8 @@ int main(int argc, char* argv[]) {
     PRINT(totJoin);
     PRINT(totSelfJoin);
     PRINT(totChecksum);
-    PRINT(totUseIndex);
-    PRINT(totNotUseIndex);
+//    PRINT(totUseIndex);
+//    PRINT(totNotUseIndex);
     cerr << "Total : "<< tot << endl;
     cerr << "Processing Time : " << endTimer(t) << endl;
 

@@ -25,7 +25,7 @@ struct SelectInfoComparer{
 class Joiner {
     friend Checksum;
     /// Add scan to query
-    std::shared_ptr<Operator> addScan(std::set<unsigned>& usedRelations,SelectInfo& info,QueryInfo& query);
+    std::shared_ptr<Operator> addScan(SelectInfo& info,QueryInfo& query);
  
     boost::asio::io_service ioService;
     boost::thread_group threadPool;
@@ -93,8 +93,9 @@ class Joiner {
     std::vector<std::string> getAsyncJoinResults();
 	/// print asyncJoin infos
 	void printAsyncJoinInfo();
-    uint64_t estimatePredicateCost(PredicateInfo &p, uint64_t leftSize, uint64_t rightSize);
     uint64_t estimateFilterResultSize(FilterInfo &f, uint64_t inputSize);
+    double estimatePredicateSel(PredicateInfo &p);
+    void loadHistograms();
 
     void createAsyncQueryTask(std::string line);
     ~Joiner() {

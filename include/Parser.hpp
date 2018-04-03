@@ -70,7 +70,7 @@ struct PredicateInfo {
     SelectInfo left;
     /// Right
     SelectInfo right;
-    uint64_t cost;
+    double sel;
     /// The constructor
     PredicateInfo(SelectInfo left, SelectInfo right) : left(left), right(right){};
     /// Dump text format

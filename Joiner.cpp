@@ -7,6 +7,7 @@
 #include <set>
 #include <sstream>
 #include <vector>
+#include <algorithm>
 #include "Parser.hpp"
 #ifdef ANALYZE
 extern map<unsigned, unsigned> numRelation;
@@ -88,10 +89,9 @@ Relation& Joiner::getRelation(unsigned relationId)
     return relations[relationId];
 }
 //---------------------------------------------------------------------------
-shared_ptr<Operator> Joiner::addScan(set<unsigned>& usedRelations,SelectInfo& info,QueryInfo& query)
+shared_ptr<Operator> Joiner::addScan(SelectInfo& info,QueryInfo& query)
 // Add scan to query
 {
-    usedRelations.emplace(info.binding);
     vector<FilterInfo> filters;
     for (auto& f : query.filters) {
         if (f.filterColumn.binding==info.binding) {
@@ -116,11 +116,11 @@ static QueryGraphProvides analyzeInputOfJoin(set<unsigned>& usedRelations,Select
     return QueryGraphProvides::None;
 }
 //---------------------------------------------------------------------------
+//vector<unsigned> idxs;
 void Joiner::join(QueryInfo& query, int queryIndex)
 // Executes a join query
 {
     //cerr << query.dumpText() << endl;
-    set<unsigned> usedRelations;
     uint64_t simulSize[4];
     for (unsigned i = 0; i < query.relationIds.size(); i++){
         simulSize[i] = relations[query.relationIds[i]].size;
@@ -129,16 +129,85 @@ void Joiner::join(QueryInfo& query, int queryIndex)
         simulSize[f.filterColumn.binding] = estimateFilterResultSize(f, simulSize[f.filterColumn.binding]);
     }
     for (auto &p : query.predicates){
-        p.cost = estimatePredicateCost(p, simulSize[p.left.binding], simulSize[p.right.binding]);
+        p.sel = estimatePredicateSel(p);
     }
-    struct PredicateComparer{
-        bool operator()(const PredicateInfo &a, const PredicateInfo &b){
-            return a.cost < b.cost;
+    vector<unsigned> idxs;
+    idxs.reserve(query.predicates.size());
+    for (unsigned i = 0; i < query.predicates.size(); ++i){
+        idxs.emplace_back(i);
+    }
+//    if (!idxs.size()){
+//        idxs.reserve(query.predicates.size());
+//        for (unsigned i = 0; i < query.predicates.size(); ++i){
+//            idxs.emplace_back(i);
+//        }
+//    }
+//    else{
+//        next_permutation(idxs.begin(), idxs.end());
+//    }
+    vector<unsigned> bestIdxs;
+    uint64_t bestCost = -1;
+    do{
+        uint64_t cost = 0;
+        uint64_t sizes[4];
+        unsigned group[4];
+        for (unsigned i = 0; i < query.relationIds.size(); ++i){
+            sizes[i] = simulSize[i];
+            group[i] = i;
         }
-    } predicateComparer;
-    sort(query.predicates.begin(), query.predicates.end(), predicateComparer);
+        for (auto x:idxs){
+            PredicateInfo &p(query.predicates[x]);
+            if (group[p.left.binding] == group[p.right.binding]){
+                uint64_t resSize = sizes[p.left.binding] * p.sel;
+                cost += sizes[p.left.binding];
+                unsigned gid = group[p.left.binding];
+                for (unsigned i = 0; i < query.relationIds.size(); ++i){
+                    if (group[i] == gid){
+                        sizes[i] = resSize;
+                    }
+                }
+            }
+            else{
+                uint64_t resSize = sizes[p.left.binding] * sizes[p.right.binding] * p.sel;
+                cost += 2 * (sizes[p.left.binding] + sizes[p.right.binding]) +
+                    min(sizes[p.left.binding], sizes[p.right.binding]) + resSize;
+                unsigned lgid = group[p.left.binding];
+                unsigned rgid = group[p.right.binding];
+                for (unsigned i = 0; i < query.relationIds.size(); ++i){
+                    if (group[i] == lgid || group[i] == rgid){
+                        group[i] = lgid;
+                        sizes[i] = resSize;
+                    }
+                }
+            }
+        }
+        if (bestCost > cost){
+            bestCost = cost;
+            bestIdxs = idxs;
+        }
+        //TEST
+        //break;
+    }while(next_permutation(idxs.begin(), idxs.end()));
+    vector<PredicateInfo> resultPredicates;
+    resultPredicates.reserve(query.predicates.size());
+    for (auto x:bestIdxs){
+        resultPredicates.emplace_back(move(query.predicates[x]));
+    }
+    query.predicates = move(resultPredicates);
     // We always start with the first join predicate and append the other joins to it (--> left-deep join trees)
     // You might want to choose a smarter join ordering ...
+//#ifdef ANALYZE
+//    extern uint64_t totFilterScan;
+//    extern uint64_t totJoin;
+//    extern uint64_t totSelfJoin;
+//    extern uint64_t totChecksum;
+//    uint64_t tot = totFilterScan + totJoin + totSelfJoin + totChecksum;
+//    fprintf(stderr, "%d %d %d %15lu : %15lu \n", bestIdxs[0], bestIdxs[1], bestIdxs[2], bestCost, tot);
+//    totFilterScan = 0;
+//    totJoin = 0;
+//    totSelfJoin = 0;
+//    totChecksum = 0;
+//#endif
     shared_ptr<Operator> root[4];
 #ifdef VERBOSE
     unsigned opIdx = 0;
@@ -179,11 +248,11 @@ void Joiner::join(QueryInfo& query, int queryIndex)
         }
     }
 
-    std::shared_ptr<Checksum> checkSum = std::make_shared<Checksum>(*this, root, query.selections);
+    std::shared_ptr<Checksum> checkSum = std::make_shared<Checksum>(*this, root[0], query.selections);
 #ifdef VERBOSE
     checkSum->setOperatorIndex(opIdx++);
 #endif
-    root->setParent(checkSum);
+    root[0]->setParent(checkSum);
 #ifdef VERBOSE
 	cout << "Joiner: Query runs asynchrounously: " << queryIndex << endl; 
 #endif
@@ -223,11 +292,23 @@ void Joiner::createAsyncQueryTask(string line)
     ioService.post(bind(&Joiner::join, this, query, nextQueryIndex)); 
     __sync_fetch_and_add(&nextQueryIndex, 1);
 }
-uint64_t Joiner::estimatePredicateCost(PredicateInfo &p, uint64_t leftSize, uint64_t rightSize)
+double Joiner::estimatePredicateSel(PredicateInfo &p)
 {
     uint64_t res = 0;
     map<uint64_t, uint64_t> &left(relations[p.left.relId].histograms[p.left.colId]);
     map<uint64_t, uint64_t> &right(relations[p.right.relId].histograms[p.right.colId]);
+//    if (left.empty()){
+////        if (__sync_bool_compare_and_swap(&relations[p.left.relId].histogramReady[p.left.colId], 0, 1)){
+////            ioService.post(bind(&Relation::loadHistogram, &relations[p.left.relId], p.left.colId)); 
+////        }
+//        return 1.0;
+//    }
+//    if (right.empty()){
+////        if (__sync_bool_compare_and_swap(&relations[p.right.relId].histogramReady[p.right.colId], 0, 1)){
+////            ioService.post(bind(&Relation::loadHistogram, &relations[p.right.relId], p.right.colId)); 
+////        }
+//        return 1.0;
+//    }
     auto l = left.begin();
     auto r = right.begin();
     while(l != left.end() && r != right.end()){
@@ -243,16 +324,21 @@ uint64_t Joiner::estimatePredicateCost(PredicateInfo &p, uint64_t leftSize, uint
             ++r;
         }
     }
-    //uint64_t buildSize = min(relations[p.left.relId].size, relations[p.right.relId].size);
-    //return buildSize + res * HISTOGRAM_SAMPLE * HISTOGRAM_SAMPLE / (1 <<HISTOGRAM_SHIFT);
     uint64_t simulSize = res* HISTOGRAM_SAMPLE * HISTOGRAM_SAMPLE / (1 <<HISTOGRAM_SHIFT);
     uint64_t maxSize = relations[p.left.relId].size * relations[p.right.relId].size;
-    return leftSize + rightSize + leftSize * rightSize * simulSize / maxSize;
+    double sel = 1.0 * simulSize / maxSize;
+    return sel; 
 }
 uint64_t Joiner::estimateFilterResultSize(FilterInfo &f, uint64_t inputSize)
 {
     uint64_t res = 0;
     map<uint64_t, uint64_t> &hist(relations[f.filterColumn.relId].histograms[f.filterColumn.colId]);
+////    if (hist.empty()){
+//////        if (__sync_bool_compare_and_swap(&relations[p.right.relId].histogramReady[p.right.colId], 0, 1)){
+//////            ioService.post(bind(&Relation::loadHistogram, &relations[f.filterColumn.relId], f.filterColumn.colId)); 
+//////        }
+////        return inputSize;
+////    }
     if (f.comparison == FilterInfo::Equal){
         auto iter = hist.find(f.constant>>HISTOGRAM_SHIFT); 
         if (iter != hist.end()){
@@ -277,5 +363,18 @@ uint64_t Joiner::estimateFilterResultSize(FilterInfo &f, uint64_t inputSize)
             }
         }
     }
-    return res * HISTOGRAM_SAMPLE * inputSize / relations[f.filterColumn.relId].size;
+    uint64_t resSize = res * HISTOGRAM_SAMPLE * inputSize / relations[f.filterColumn.relId].size;
+        
+    if (resSize > inputSize){
+        resSize = inputSize;
+    }
+    return resSize;
+}
+void Joiner::loadHistograms(){
+    for (auto &r: relations){
+        for (unsigned i = 0; i < r.columns.size(); ++i){
+            //ioService.post(bind(&Relation::loadHistogram, &r, i)); 
+            r.loadHistogram(i); 
+        }
+    }
 }

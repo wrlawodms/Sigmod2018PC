@@ -86,7 +86,7 @@ void Relation::loadRelation(const char* fileName)
         this->columns.push_back(reinterpret_cast<uint64_t*>(addr));
         addr+=size*sizeof(uint64_t);
     }
-    loadHistogram();
+	histograms.resize(columns.size());
 }
 //---------------------------------------------------------------------------
 Relation::Relation(const char* fileName) : ownsMemory(false)
@@ -104,16 +104,21 @@ Relation::~Relation()
     }
 }
 //---------------------------------------------------------------------------
-void Relation::loadHistogram()
+void Relation::loadHistogram(unsigned colId)
 {
-	histograms.reserve(columns.size());
-	for (auto &c:columns){
-        map<uint64_t, uint64_t> hist;
+	auto &c(columns[colId]);
+    map<uint64_t, uint64_t> hist;
 
-		for (unsigned i=0;i<size;i+=HISTOGRAM_SAMPLE){
-            ++hist[c[i] >> HISTOGRAM_SHIFT];
-		}
-        histograms.emplace_back(move(hist));
+    for (uint64_t i = 0; i < size; i+=HISTOGRAM_SAMPLE){
+        ++hist[c[i] >> HISTOGRAM_SHIFT];
     }
+//    uint64_t i = 0;
+//    while(i+8 < size){
+//        for (unsigned j=0;j<8;++j){
+//            ++hist[c[i++] >> HISTOGRAM_SHIFT];
+//        }
+//        i += HISTOGRAM_SAMPLE * 8;
+//    }
+    histograms[colId] = move(hist);
 }
 //---------------------------------------------------------------------------
