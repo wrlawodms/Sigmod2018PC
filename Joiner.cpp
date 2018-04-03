@@ -297,18 +297,6 @@ double Joiner::estimatePredicateSel(PredicateInfo &p)
     uint64_t res = 0;
     map<uint64_t, uint64_t> &left(relations[p.left.relId].histograms[p.left.colId]);
     map<uint64_t, uint64_t> &right(relations[p.right.relId].histograms[p.right.colId]);
-//    if (left.empty()){
-////        if (__sync_bool_compare_and_swap(&relations[p.left.relId].histogramReady[p.left.colId], 0, 1)){
-////            ioService.post(bind(&Relation::loadHistogram, &relations[p.left.relId], p.left.colId)); 
-////        }
-//        return 1.0;
-//    }
-//    if (right.empty()){
-////        if (__sync_bool_compare_and_swap(&relations[p.right.relId].histogramReady[p.right.colId], 0, 1)){
-////            ioService.post(bind(&Relation::loadHistogram, &relations[p.right.relId], p.right.colId)); 
-////        }
-//        return 1.0;
-//    }
     auto l = left.begin();
     auto r = right.begin();
     while(l != left.end() && r != right.end()){
@@ -333,12 +321,6 @@ uint64_t Joiner::estimateFilterResultSize(FilterInfo &f, uint64_t inputSize)
 {
     uint64_t res = 0;
     map<uint64_t, uint64_t> &hist(relations[f.filterColumn.relId].histograms[f.filterColumn.colId]);
-////    if (hist.empty()){
-//////        if (__sync_bool_compare_and_swap(&relations[p.right.relId].histogramReady[p.right.colId], 0, 1)){
-//////            ioService.post(bind(&Relation::loadHistogram, &relations[f.filterColumn.relId], f.filterColumn.colId)); 
-//////        }
-////        return inputSize;
-////    }
     if (f.comparison == FilterInfo::Equal){
         auto iter = hist.find(f.constant>>HISTOGRAM_SHIFT); 
         if (iter != hist.end()){
@@ -373,8 +355,23 @@ uint64_t Joiner::estimateFilterResultSize(FilterInfo &f, uint64_t inputSize)
 void Joiner::loadHistograms(){
     for (auto &r: relations){
         for (unsigned i = 0; i < r.columns.size(); ++i){
-            //ioService.post(bind(&Relation::loadHistogram, &r, i)); 
-            r.loadHistogram(i); 
+            ioService.post(bind(&Relation::loadHistogram, &r, i)); 
+        }
+    }
+    bool done = false;
+    while(!done){
+        usleep(100000);
+        done = true;
+        for (auto &r: relations){
+            for (unsigned i = 0; i < r.columns.size(); ++i){
+                if (!r.histograms[i].size()){
+                    done = false;
+                    break;
+                }
+            }
+            if (!done){
+                break;
+            }
         }
     }
 }
