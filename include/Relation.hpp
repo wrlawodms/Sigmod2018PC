@@ -18,8 +18,7 @@ public:
     uint64_t size;
     /// The join column containing the keys
     std::vector<uint64_t*> columns;
-    std::vector<std::map<uint64_t, uint64_t>> histograms;
-    //std::vector<unsigned> histogramReady;
+    std::vector<std::vector<std::pair<uint64_t, uint64_t>>> histograms;
 
     /// Stores a relation into a file (binary)
     void storeRelation(const std::string& fileName);

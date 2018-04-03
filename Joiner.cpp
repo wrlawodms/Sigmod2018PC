@@ -299,8 +299,8 @@ double Joiner::estimatePredicateSel(PredicateInfo &p)
         return cached->second;
     }
     uint64_t res = 0;
-    map<uint64_t, uint64_t> &left(relations[p.left.relId].histograms[p.left.colId]);
-    map<uint64_t, uint64_t> &right(relations[p.right.relId].histograms[p.right.colId]);
+    auto &left(relations[p.left.relId].histograms[p.left.colId]);
+    auto &right(relations[p.right.relId].histograms[p.right.colId]);
     auto l = left.begin();
     auto r = right.begin();
     while(l != left.end() && r != right.end()){
@@ -325,15 +325,17 @@ double Joiner::estimatePredicateSel(PredicateInfo &p)
 uint64_t Joiner::estimateFilterResultSize(FilterInfo &f, uint64_t inputSize)
 {
     uint64_t res = 0;
-    map<uint64_t, uint64_t> &hist(relations[f.filterColumn.relId].histograms[f.filterColumn.colId]);
+    auto &hist(relations[f.filterColumn.relId].histograms[f.filterColumn.colId]);
     if (f.comparison == FilterInfo::Equal){
-        auto iter = hist.find(f.constant>>HISTOGRAM_SHIFT); 
-        if (iter != hist.end()){
+        uint64_t v = f.constant>>HISTOGRAM_SHIFT;
+        auto iter = lower_bound(hist.begin(), hist.end(), pair<uint64_t, uint64_t>(v, 0)); 
+        if (iter != hist.end() && iter->first == v){
             res=iter->second*(f.constant - (iter->first<<HISTOGRAM_SHIFT) + 1)/ (1<<HISTOGRAM_SHIFT);
         }
     }
     else if (f.comparison == FilterInfo::Less){
-        auto end = hist.lower_bound(f.constant>>HISTOGRAM_SHIFT); 
+        uint64_t v = f.constant>>HISTOGRAM_SHIFT;
+        auto end = lower_bound(hist.begin(), hist.end(), pair<uint64_t, uint64_t>(v, 0));
         for (auto iter = hist.begin(); iter != end; ++iter){
             res+=iter->second;
         }
@@ -342,7 +344,8 @@ uint64_t Joiner::estimateFilterResultSize(FilterInfo &f, uint64_t inputSize)
         }
     }
     else{
-        auto start = hist.lower_bound((f.constant+1)>>HISTOGRAM_SHIFT); 
+        uint64_t v = (f.constant+1)>>HISTOGRAM_SHIFT;
+        auto start = lower_bound(hist.begin(), hist.end(), pair<uint64_t, uint64_t>(v, 0)); 
         if (start != hist.end()){
             res+=start->second * ((1<<HISTOGRAM_SHIFT) - (f.constant + 1 - (start->first<<HISTOGRAM_SHIFT)))/(1<<HISTOGRAM_SHIFT);
             for (auto iter = start; iter != hist.end(); ++iter){

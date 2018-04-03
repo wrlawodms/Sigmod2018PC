@@ -108,17 +108,15 @@ void Relation::loadHistogram(unsigned colId)
 {
 	auto &c(columns[colId]);
     map<uint64_t, uint64_t> hist;
+    vector<pair<uint64_t, uint64_t>> res;
 
     for (uint64_t i = 0; i < size; i+=HISTOGRAM_SAMPLE){
         ++hist[c[i] >> HISTOGRAM_SHIFT];
     }
-//    uint64_t i = 0;
-//    while(i+8 < size){
-//        for (unsigned j=0;j<8;++j){
-//            ++hist[c[i++] >> HISTOGRAM_SHIFT];
-//        }
-//        i += HISTOGRAM_SAMPLE * 8;
-//    }
-    histograms[colId] = move(hist);
+    res.reserve(hist.size());
+    for (auto &h : hist){
+        res.emplace_back(h);
+    }
+    histograms[colId] = move(res);
 }
 //---------------------------------------------------------------------------
