@@ -294,6 +294,10 @@ void Joiner::createAsyncQueryTask(string line)
 }
 double Joiner::estimatePredicateSel(PredicateInfo &p)
 {
+    auto cached = predSels.find(p); 
+    if (cached != predSels.end()){
+        return cached->second;
+    }
     uint64_t res = 0;
     map<uint64_t, uint64_t> &left(relations[p.left.relId].histograms[p.left.colId]);
     map<uint64_t, uint64_t> &right(relations[p.right.relId].histograms[p.right.colId]);
@@ -315,6 +319,7 @@ double Joiner::estimatePredicateSel(PredicateInfo &p)
     uint64_t simulSize = res* HISTOGRAM_SAMPLE * HISTOGRAM_SAMPLE / (1 <<HISTOGRAM_SHIFT);
     uint64_t maxSize = relations[p.left.relId].size * relations[p.right.relId].size;
     double sel = 1.0 * simulSize / maxSize;
+    predSels.emplace(p, sel); 
     return sel; 
 }
 uint64_t Joiner::estimateFilterResultSize(FilterInfo &f, uint64_t inputSize)

@@ -20,6 +20,18 @@ struct SelectInfoComparer{
         return a.relId < b.relId || (a.relId == b.relId && a.colId < b.colId);
     }
 };
+struct PredicateInfoHash{
+    size_t operator()(const PredicateInfo &a) const{
+        return ((uint64_t)a.left.relId << 48) | ((uint64_t)a.left.colId << 32) |
+            ((uint64_t)a.right.relId << 16) | ((uint64_t)a.right.colId);
+    }
+};
+struct PredicateInfoEqual{
+    bool operator()(const PredicateInfo &a, const PredicateInfo &b) const{
+        return a.left.relId == b.left.relId && a.left.colId == b.left.colId &&
+            a.right.relId == b.right.relId && a.right.colId == b.right.colId;
+    }
+};
 #endif
 
 class Joiner {
@@ -33,9 +45,9 @@ class Joiner {
     
     int pendingAsyncJoin = 0;
     int nextQueryIndex = 0;
+    std::unordered_map<PredicateInfo, double, PredicateInfoHash, PredicateInfoEqual> predSels;
     std::vector<std::vector<uint64_t>> asyncResults; //checksums
     std::vector<std::shared_ptr<Checksum>> asyncJoins;
-//    std::vector<std::shared_ptr<Checksum>> tmp;
     std::condition_variable cvAsync;
     std::mutex cvAsyncMt;
     
