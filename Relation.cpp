@@ -113,10 +113,13 @@ void Relation::loadHistogram(unsigned colId)
     for (uint64_t i = 0; i < size; i+=HISTOGRAM_SAMPLE){
         ++hist[c[i] >> HISTOGRAM_SHIFT];
     }
-    res.reserve(hist.size());
+    res.reserve(hist.size()+1);
+    uint64_t sum = 0;
     for (auto &h : hist){
-        res.emplace_back(h);
+        res.emplace_back(h.first, sum);
+        sum += h.second;
     }
+    res.emplace_back(UINT64_MAX, sum);
     histograms[colId] = move(res);
 }
 //---------------------------------------------------------------------------

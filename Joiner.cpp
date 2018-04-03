@@ -146,7 +146,7 @@ void Joiner::join(QueryInfo& query, int queryIndex)
 //        next_permutation(idxs.begin(), idxs.end());
 //    }
     vector<unsigned> bestIdxs;
-    uint64_t bestCost = -1;
+    uint64_t bestCost = UINT64_MAX;
     do{
         uint64_t cost = 0;
         uint64_t sizes[4];
@@ -303,9 +303,9 @@ double Joiner::estimatePredicateSel(PredicateInfo &p)
     auto &right(relations[p.right.relId].histograms[p.right.colId]);
     auto l = left.begin();
     auto r = right.begin();
-    while(l != left.end() && r != right.end()){
+    while(l != left.end()-1 && r != right.end()-1){
         if (l->first == r->first){
-            res += l->second * r->second;
+            res += ((l+1)->second - l->second) * ((r+1)->second - r->second);
             ++l;
             ++r;
         }
@@ -324,33 +324,36 @@ double Joiner::estimatePredicateSel(PredicateInfo &p)
 }
 uint64_t Joiner::estimateFilterResultSize(FilterInfo &f, uint64_t inputSize)
 {
+#define HISTOGRAM_RANGE (1<<HISTOGRAM_SHIFT)
     uint64_t res = 0;
     auto &hist(relations[f.filterColumn.relId].histograms[f.filterColumn.colId]);
     if (f.comparison == FilterInfo::Equal){
         uint64_t v = f.constant>>HISTOGRAM_SHIFT;
-        auto iter = lower_bound(hist.begin(), hist.end(), pair<uint64_t, uint64_t>(v, 0)); 
-        if (iter != hist.end() && iter->first == v){
-            res=iter->second*(f.constant - (iter->first<<HISTOGRAM_SHIFT) + 1)/ (1<<HISTOGRAM_SHIFT);
+        auto iter = lower_bound(hist.begin(), hist.end()-1, pair<uint64_t, uint64_t>(v, 0)); 
+        if (iter != hist.end()-1 && iter->first == v){
+            res=((iter+1)->second - iter->second) *
+                (f.constant - (iter->first<<HISTOGRAM_SHIFT) + 1) / HISTOGRAM_RANGE;
         }
     }
     else if (f.comparison == FilterInfo::Less){
         uint64_t v = f.constant>>HISTOGRAM_SHIFT;
-        auto end = lower_bound(hist.begin(), hist.end(), pair<uint64_t, uint64_t>(v, 0));
-        for (auto iter = hist.begin(); iter != end; ++iter){
-            res+=iter->second;
-        }
-        if (end != hist.end()){
-            res+=end->second*(f.constant < (end->first<<HISTOGRAM_SHIFT) ? 1 : (f.constant - (end->first<<HISTOGRAM_SHIFT))/ (1<<HISTOGRAM_SHIFT));
+        auto end = lower_bound(hist.begin(), hist.end()-1, pair<uint64_t, uint64_t>(v, 0));
+        res = end->second;
+        if (end != hist.end()-1){
+            uint64_t endVal = end->first<<HISTOGRAM_SHIFT;
+            res += ((end+1)->second - end->second) *
+                (f.constant <= endVal ? 0 : (f.constant - endVal) / HISTOGRAM_RANGE);
         }
     }
     else{
         uint64_t v = (f.constant+1)>>HISTOGRAM_SHIFT;
-        auto start = lower_bound(hist.begin(), hist.end(), pair<uint64_t, uint64_t>(v, 0)); 
-        if (start != hist.end()){
-            res+=start->second * ((1<<HISTOGRAM_SHIFT) - (f.constant + 1 - (start->first<<HISTOGRAM_SHIFT)))/(1<<HISTOGRAM_SHIFT);
-            for (auto iter = start; iter != hist.end(); ++iter){
-                res+=iter->second;
-            }
+        auto start = lower_bound(hist.begin(), hist.end()-1, pair<uint64_t, uint64_t>(v, 0)); 
+        if (start != hist.end()-1){
+            uint64_t startVal = start->first<<HISTOGRAM_SHIFT;
+            res = ((start+1)->second - start->second) *
+                (f.constant+1 <= startVal ? 1 :
+                 (HISTOGRAM_RANGE - (f.constant + 1 - startVal)) / HISTOGRAM_RANGE);
+            res += (hist.end()-1)->second - (start+1)->second;
         }
     }
     uint64_t resSize = res * HISTOGRAM_SAMPLE * inputSize / relations[f.filterColumn.relId].size;
