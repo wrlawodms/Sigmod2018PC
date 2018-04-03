@@ -4,6 +4,7 @@
 #include <stdint.h>
 #include <assert.h>
 #include <string.h>
+#include <sys/mman.h>
 
 #define NODE_UNUSED 0
 #define NODE_USED 1	
@@ -20,6 +21,7 @@ buddy_new(int level) {
 	uint64_t size = 1lu << level;
 	struct buddy * self = (struct buddy*)malloc(sizeof(struct buddy) + sizeof(uint8_t) * (size * 2 - 2));
 	self->level = level;
+    madvise(self, sizeof(struct buddy)+sizeof(uint8_t)*(size*2-2), MADV_HUGEPAGE);    
 	memset(self->tree , NODE_UNUSED , size*2-1);
 	return self;
 }

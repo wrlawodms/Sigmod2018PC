@@ -2,6 +2,7 @@
 #include <assert.h>
 #include <iostream>
 #include <Utils.hpp>
+#include <sys/mman.h>
 
 
 static inline uint64_t
@@ -29,6 +30,7 @@ MemoryPool::MemoryPool(uint64_t size, uint64_t assignUnit) {
     
     meta = buddy_new(level); 
     pool = (char*)malloc(allocSize);
+    madvise(pool, allocSize, MADV_HUGEPAGE);    
 }
 
 MemoryPool::~MemoryPool() {
