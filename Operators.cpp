@@ -266,6 +266,11 @@ void Join::createAsyncTasks(boost::asio::io_service& ioService) {
     leftColId=left->resolve(pInfo.left);
     rightColId=right->resolve(pInfo.right);
 
+    if (requestedColumnsLeft.size() == 0 ||
+        (requestedColumnsLeft.size() == 1 && requestedColumnsLeft[0] == pInfo.left)) {
+        needCntOnly = true;
+    }
+
     //cntPartition = CNT_PARTITIONS(right->getResultsSize(), partitionSize); 
 	cntPartition = CNT_PARTITIONS(left->resultSize*8*2, partitionSize); // uint64*2(key, value)
     //CNT_PARTITIONS(left->getResultsSize(), partitionSize); 
@@ -572,10 +577,16 @@ void Join::scatteringTask(boost::asio::io_service* ioService, int taskIndex, int
                 return;         
             }
             for (int i=0; i<cntPartition; i++) {
-                hashTables.emplace_back();
+                if (needCntOnly) 
+                    hashTablesCnt.emplace_back();
+                else
+                    hashTablesIndices.emplace_back();
             }
             for (int i=0; i<cntPartition; i++) {
-                hashTables[i] = NULL;
+                if (needCntOnly) 
+                    hashTablesCnt[i] = NULL;
+                else
+                    hashTablesIndices[i] = NULL;
             }
             pendingBuilding = subJoinTarget.size();
             unsigned taskNum = pendingBuilding;
@@ -599,7 +610,7 @@ void Join::buildingTask(boost::asio::io_service* ioService, int taskIndex, vecto
 //    shared_ptr<unordered_multimap<uint64_t, uint64_t>> hashTable = make_shared<unordered_multimap<uint64_t, uint64_t>>();
 
     if (limitLeft > limitRight*2){
-        __sync_fetch_and_add(&cnt, 1);
+        //__sync_fetch_and_add(&cnt, 1);
          /*
         cerr << "Warning : left partition > right partition - " << limitLeft << " > "<< limitRight << endl;
         cerr << "totalLeft: " << left->resultSize << " taotalRight: " << right->resultSize << " " << cntPartition << endl;
@@ -624,8 +635,18 @@ void Join::buildingTask(boost::asio::io_service* ioService, int taskIndex, vecto
         */
     }
     if (limitLeft > hashThreshold) {
-        hashTables[taskIndex] = new unordered_multimap<uint64_t, uint64_t>();
-        unordered_multimap<uint64_t, uint64_t>* hashTable = hashTables[taskIndex];
+        if (needCntOnly) { 
+            hashTablesCnt[taskIndex] = new unordered_map<uint64_t, uint64_t>();
+        }else {
+            hashTablesIndices[taskIndex] = new unordered_multimap<uint64_t, uint64_t>();
+        }
+        unordered_map<uint64_t, uint64_t>* hashTableCnt = NULL;
+        unordered_multimap<uint64_t, uint64_t>* hashTableIndices = NULL;
+        
+        if (needCntOnly) 
+            hashTableCnt = hashTablesCnt[taskIndex];
+        else 
+            hashTableIndices = hashTablesIndices[taskIndex];
         std::vector<uint64_t*> copyLeftData; //,copyRightData;
         //vector<vector<uint64_t>>& localResults = tmpResults[taskIndex];
         uint64_t* leftKeyColumn = localLeft[leftColId];
@@ -639,10 +660,35 @@ void Join::buildingTask(boost::asio::io_service* ioService, int taskIndex, vecto
 
         // building
         //hashTable.reserve(limitLeft);
-        hashTable->reserve(limitLeft*2);
+        if(needCntOnly) {
+            hashTableCnt->reserve(limitLeft*2); //중복이면 이렇게나 할 필요 없긴한디 
+        } else {
+            hashTableIndices->reserve(limitLeft*2);
+        }
+
+        /*
+        unordered_map<uint64_t, uint64_t> xx;
         for (uint64_t i=0; i<limitLeft; i++) {
-            hashTable->emplace(make_pair(leftKeyColumn[i],i));
-        //    bloomFilter.insert(leftKeyColumn[i]);
+            ++xx[leftKeyColumn[i]];
+        }
+        if (limitLeft > limitRight*2) {
+            static int ccnt = 0;
+            if (ccnt++ < 50) {
+                uint64_t max = 0;
+                for (auto it=xx.begin(); it !=xx.end(); ++it) {
+                    if (max < it->second)
+                        max = it->second;
+                }
+                cerr << limitLeft << " " << max << " " << max/(limitLeft*1.0) << " " << needCntOnly <<endl ;
+            }
+        }*/
+        
+        for (uint64_t i=0; i<limitLeft; i++) {
+            if (needCntOnly) {
+                (*hashTableCnt)[leftKeyColumn[i]]++; 
+            } else {
+                hashTableIndices->emplace(make_pair(leftKeyColumn[i],i));
+            }
         }
     }
     unsigned cntTask = cntProbing[taskIndex]; 
@@ -686,7 +732,13 @@ void Join::probingTask(boost::asio::io_service* ioService, int partIndex, int ta
     unsigned leftColSize = requestedColumnsLeft.size();
     unsigned rightColSize = requestedColumnsRight.size();
     unsigned resultColSize = requestedColumns.size(); 
-    unordered_multimap<uint64_t, uint64_t>* hashTable = hashTables[partIndex];
+    unordered_multimap<uint64_t, uint64_t>* hashTableIndices = NULL;
+    unordered_map<uint64_t, uint64_t>* hashTableCnt = NULL;
+    if (needCntOnly) { 
+        hashTableCnt = hashTablesCnt[partIndex];
+    }else {
+        hashTableIndices = hashTablesIndices[partIndex];
+    }
     
     if (leftLength == 0 || length == 0)
         goto probing_finish;
@@ -703,19 +755,36 @@ void Join::probingTask(boost::asio::io_service* ioService, int partIndex, int ta
     
     if (leftLength > hashThreshold) {   
         // probing
-        for (uint64_t i=start; i<limit; i++) {
-            auto rightKey=rightKeyColumn[i];
-            /*
-            if (!bloomFilter.contains(rightKey))
-                continue;
-                */
-            auto range=hashTable->equal_range(rightKey);
-            for (auto iter=range.first;iter!=range.second;++iter) {
-                unsigned relColId=0;
-                for (unsigned cId=0;cId<leftColSize;++cId)
-                    localResults[relColId++].push_back(copyLeftData[cId][iter->second]);
-                for (unsigned cId=0;cId<rightColSize;++cId)
-                    localResults[relColId++].push_back(copyRightData[cId][i]);
+        uint64_t rightKey;
+        if (needCntOnly) {
+            for (uint64_t i=start; i<limit; i++) {
+                rightKey=rightKeyColumn[i];
+                if (hashTableCnt->find(rightKey) == hashTableCnt->end())
+                    continue;
+                uint64_t cnt = hashTableCnt->at(rightKey);
+                for (uint64_t j=0; j<cnt; j++) {
+                    unsigned relColId=0;
+                    for (unsigned cId=0;cId<leftColSize;++cId)
+                        localResults[relColId++].push_back(rightKey);
+                    for (unsigned cId=0;cId<rightColSize;++cId)
+                        localResults[relColId++].push_back(copyRightData[cId][i]);
+                }
+            }
+        }else {
+            for (uint64_t i=start; i<limit; i++) {
+                rightKey=rightKeyColumn[i];
+                /*
+                if (!bloomFilter.contains(rightKey))
+                    continue;
+                    */
+                auto range=hashTableIndices->equal_range(rightKey);
+                for (auto iter=range.first;iter!=range.second;++iter) {
+                    unsigned relColId=0;
+                    for (unsigned cId=0;cId<leftColSize;++cId)
+                        localResults[relColId++].push_back(copyLeftData[cId][iter->second]);
+                    for (unsigned cId=0;cId<rightColSize;++cId)
+                        localResults[relColId++].push_back(copyRightData[cId][i]);
+                }
             }
         }
     } else {
