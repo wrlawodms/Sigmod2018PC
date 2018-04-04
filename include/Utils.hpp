@@ -17,6 +17,7 @@ extern MemoryPool** localMemPool;
 extern thread_local int tid;
 extern int nextTid;
 //---------------------------------------------------------------------------
+extern unsigned cnt;
 class Utils {
 public:
     /// Create a dummy relation

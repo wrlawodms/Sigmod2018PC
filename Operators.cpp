@@ -266,10 +266,11 @@ void Join::createAsyncTasks(boost::asio::io_service& ioService) {
     leftColId=left->resolve(pInfo.left);
     rightColId=right->resolve(pInfo.right);
 
-    // cntPartition = CNT_PARTITIONS(right->getResultsSize(), partitionSize); 
-	cntPartition = CNT_PARTITIONS(left->getResultsSize(), partitionSize); 
+    //cntPartition = CNT_PARTITIONS(right->getResultsSize(), partitionSize); 
+	cntPartition = CNT_PARTITIONS(left->resultSize*8*2, partitionSize); // uint64*2(key, value)
+    //CNT_PARTITIONS(left->getResultsSize(), partitionSize); 
     if (cntPartition < 32) 
-        cntPartition = 32 < left->getResultsSize() ? 32 : left->getResultsSize();
+        cntPartition = 32; // < left->getResultsSize() ? 32 : left->getResultsSize();
     cntPartition = 1<<(Utils::log2(cntPartition-1)+1); // round up, power of 2 for hashing
     	
 #ifdef VERBOSE
@@ -596,27 +597,54 @@ void Join::buildingTask(boost::asio::io_service* ioService, int taskIndex, vecto
     // Resolve the partitioned columns
     // unordered_multimap<uint64_t, uint64_t>& hashTable = hashTables[taskIndex];
 //    shared_ptr<unordered_multimap<uint64_t, uint64_t>> hashTable = make_shared<unordered_multimap<uint64_t, uint64_t>>();
-    hashTables[taskIndex] = new unordered_multimap<uint64_t, uint64_t>();
-    unordered_multimap<uint64_t, uint64_t>* hashTable = hashTables[taskIndex];
-    std::vector<uint64_t*> copyLeftData; //,copyRightData;
-    //vector<vector<uint64_t>>& localResults = tmpResults[taskIndex];
-    uint64_t* leftKeyColumn = localLeft[leftColId];
-//    uint64_t* rightKeyColumn = localRight[rightColId];
 
-    //bloom_filter bloomFilter(bloomArgs);
-
-    for (auto& info : requestedColumnsLeft) {
-        copyLeftData.push_back(localLeft[left->resolve(info)]);
+    if (limitLeft > limitRight*2){
+        __sync_fetch_and_add(&cnt, 1);
+         /*
+        cerr << "Warning : left partition > right partition - " << limitLeft << " > "<< limitRight << endl;
+        cerr << "totalLeft: " << left->resultSize << " taotalRight: " << right->resultSize << " " << cntPartition << endl;
+        uint64_t min = -1;
+        uint64_t max = 0;
+        for (int i=0; i<cntPartition; i++) {
+            if (partitionLength[0][i] < min)
+                min = partitionLength[0][i];
+            if (partitionLength[0][i] > max)
+                max = partitionLength[0][i];
+        }
+        cerr << "left min: " << min << " max: " << max << endl;
+        min = -1;
+        max = 0;
+        for (int i=0; i<cntPartition; i++) {
+            if (partitionLength[1][i] < min)
+                min = partitionLength[1][i];
+            if (partitionLength[1][i] > max)
+                max = partitionLength[1][i];
+        }
+        cerr << "right min: " << min << " max: " << max << endl;
+        */
     }
+    if (limitLeft > hashThreshold) {
+        hashTables[taskIndex] = new unordered_multimap<uint64_t, uint64_t>();
+        unordered_multimap<uint64_t, uint64_t>* hashTable = hashTables[taskIndex];
+        std::vector<uint64_t*> copyLeftData; //,copyRightData;
+        //vector<vector<uint64_t>>& localResults = tmpResults[taskIndex];
+        uint64_t* leftKeyColumn = localLeft[leftColId];
+    //    uint64_t* rightKeyColumn = localRight[rightColId];
 
-    // building
-    //hashTable.reserve(limitLeft);
-    hashTable->reserve(limitLeft*2);
-    for (uint64_t i=0; i<limitLeft; i++) {
-        hashTable->emplace(make_pair(leftKeyColumn[i],i));
-    //    bloomFilter.insert(leftKeyColumn[i]);
+        //bloom_filter bloomFilter(bloomArgs);
+
+        for (auto& info : requestedColumnsLeft) {
+            copyLeftData.push_back(localLeft[left->resolve(info)]);
+        }
+
+        // building
+        //hashTable.reserve(limitLeft);
+        hashTable->reserve(limitLeft*2);
+        for (uint64_t i=0; i<limitLeft; i++) {
+            hashTable->emplace(make_pair(leftKeyColumn[i],i));
+        //    bloomFilter.insert(leftKeyColumn[i]);
+        }
     }
-
     unsigned cntTask = cntProbing[taskIndex]; 
     uint64_t taskLength = lengthProbing[taskIndex];
     unsigned rest = restProbing[taskIndex];
@@ -637,20 +665,21 @@ void Join::buildingTask(boost::asio::io_service* ioService, int taskIndex, vecto
             length++;
             rest--;
         }
-        ioService->post(bind(&Join::probingTask, this, ioService, taskIndex, i, localLeft, localRight, start, length)); 
+        ioService->post(bind(&Join::probingTask, this, ioService, taskIndex, i, localLeft, limitLeft, localRight, start, length)); 
         start += length;
     }
     uint64_t length = taskLength; 
     if (rest) {
         length++;
     }
-    probingTask(ioService, taskIndex, cntTask-1, localLeft, localRight, start, length); 
+    probingTask(ioService, taskIndex, cntTask-1, localLeft, limitLeft, localRight, start, length); 
 }
 
  
-void Join::probingTask(boost::asio::io_service* ioService, int partIndex, int taskIndex, vector<uint64_t*> localLeft, vector<uint64_t*> localRight, uint64_t start, uint64_t length) {
+void Join::probingTask(boost::asio::io_service* ioService, int partIndex, int taskIndex, vector<uint64_t*> localLeft, uint64_t leftLength, vector<uint64_t*> localRight, uint64_t start, uint64_t length) {
     // unordered_multimap<uint64_t, uint64_t>& hashTable = hashTables[partIndex];
     uint64_t* rightKeyColumn = localRight[rightColId];
+    uint64_t* leftKeyColumn = localLeft[leftColId];
     vector<uint64_t*> copyLeftData, copyRightData;
     vector<vector<uint64_t>>& localResults = tmpResults[partIndex][taskIndex];
     uint64_t limit = start+length;
@@ -659,13 +688,12 @@ void Join::probingTask(boost::asio::io_service* ioService, int partIndex, int ta
     unsigned resultColSize = requestedColumns.size(); 
     unordered_multimap<uint64_t, uint64_t>* hashTable = hashTables[partIndex];
     
-    if (hashTable->size() == 0 || length == 0)
+    if (leftLength == 0 || length == 0)
         goto probing_finish;
     
     for (unsigned j=0; j<requestedColumns.size(); j++) {
         localResults.emplace_back();
     }
-
     for (auto& info : requestedColumnsLeft) {
         copyLeftData.push_back(localLeft[left->resolve(info)]);
     }
@@ -673,24 +701,38 @@ void Join::probingTask(boost::asio::io_service* ioService, int partIndex, int ta
         copyRightData.push_back(localRight[right->resolve(info)]);
     }
     
-    // probing
-    for (uint64_t i=start; i<limit; i++) {
-        auto rightKey=rightKeyColumn[i];
-        /*
-        if (!bloomFilter.contains(rightKey))
-            continue;
-            */
-        auto range=hashTable->equal_range(rightKey);
-        for (auto iter=range.first;iter!=range.second;++iter) {
-            unsigned relColId=0;
-            for (unsigned cId=0;cId<leftColSize;++cId)
-                localResults[relColId++].push_back(copyLeftData[cId][iter->second]);
-            for (unsigned cId=0;cId<rightColSize;++cId)
-                localResults[relColId++].push_back(copyRightData[cId][i]);
+    if (leftLength > hashThreshold) {   
+        // probing
+        for (uint64_t i=start; i<limit; i++) {
+            auto rightKey=rightKeyColumn[i];
+            /*
+            if (!bloomFilter.contains(rightKey))
+                continue;
+                */
+            auto range=hashTable->equal_range(rightKey);
+            for (auto iter=range.first;iter!=range.second;++iter) {
+                unsigned relColId=0;
+                for (unsigned cId=0;cId<leftColSize;++cId)
+                    localResults[relColId++].push_back(copyLeftData[cId][iter->second]);
+                for (unsigned cId=0;cId<rightColSize;++cId)
+                    localResults[relColId++].push_back(copyRightData[cId][i]);
+            }
+        }
+    } else {
+        for (uint64_t i=0; i<leftLength; i++) {
+            for (uint64_t j=start; j<limit; j++) {
+                if (leftKeyColumn[i] == rightKeyColumn[j]) {
+                    unsigned relColId=0;
+                    for (unsigned cId=0;cId<leftColSize;++cId)
+                        localResults[relColId++].push_back(copyLeftData[cId][i]);
+                    for (unsigned cId=0;cId<rightColSize;++cId)
+                        localResults[relColId++].push_back(copyRightData[cId][j]);
+                }
+            }
         }
     }
 #ifdef VERBOSE
-        // cerr << "Join("<< queryIndex << "," << operatorIndex <<") subjoin finish. local result size: " << localResults[0].size() << endl;
+    // cerr << "Join("<< queryIndex << "," << operatorIndex <<") subjoin finish. local result size: " << localResults[0].size() << endl;
 #endif
     if (localResults[0].size() == 0) 
         goto probing_finish;

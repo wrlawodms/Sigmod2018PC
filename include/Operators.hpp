@@ -170,8 +170,10 @@ class Join : public Operator {
     // sequentially aloocated address for partitions, will be freed after materializing the result
     uint64_t* partitionTable[2] = {NULL, NULL};
     int allocTid = -1;
-    const uint64_t partitionSize = L2_SIZE/16;
+    const uint64_t partitionSize = L2_SIZE/8;
     uint64_t cntPartition;
+
+    const unsigned hashThreshold = 4; //left size가 넘으면 해쉬사용 안넘으면 단순 비교 
 
 
     // variablse per partitions
@@ -197,7 +199,7 @@ class Join : public Operator {
     // for cache, partition must be allocated sequentially 
     // void subJoinTask(boost::asio::io_service* ioService, int taskIndex, std::vector<uint64_t*> left, uint64_t leftLimit, std::vector<uint64_t*> right, uint64_t rightLimit);  
     void buildingTask(boost::asio::io_service* ioService, int taskIndex, std::vector<uint64_t*> left, uint64_t leftLimit, std::vector<uint64_t*> right, uint64_t rightLimit);  
-    void probingTask(boost::asio::io_service* ioService, int partIndex, int taskIndex, std::vector<uint64_t*> left, std::vector<uint64_t*> right, uint64_t start, uint64_t length);  
+    void probingTask(boost::asio::io_service* ioService, int partIndex, int taskIndex, std::vector<uint64_t*> left, uint64_t leftLength, std::vector<uint64_t*> right, uint64_t start, uint64_t length);  
     
     /// Columns that have to be materialized
     std::unordered_set<SelectInfo> requestedColumns;

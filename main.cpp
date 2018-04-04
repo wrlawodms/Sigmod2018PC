@@ -56,6 +56,7 @@ int main(int argc, char* argv[]) {
         joiner.createAsyncQueryTask(line);
         //cout << joiner.join(i);
     }
+    cerr << cnt << endl; 
     //cerr << sum;
     return 0;
 }
