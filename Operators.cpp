@@ -630,7 +630,9 @@ void Join::buildingTask(boost::asio::io_service* ioService, int taskIndex, vecto
 //    shared_ptr<unordered_multimap<uint64_t, uint64_t>> hashTable = make_shared<unordered_multimap<uint64_t, uint64_t>>();
 
     if (limitLeft > limitRight*2){
+#if 0
         __sync_fetch_and_add(&cnt, 1);
+#endif
          /*
         cerr << "Warning : left partition > right partition - " << limitLeft << " > "<< limitRight << endl;
         cerr << "totalLeft: " << left->resultSize << " taotalRight: " << right->resultSize << " " << cntPartition << endl;
@@ -718,6 +720,7 @@ void Join::probingTask(boost::asio::io_service* ioService, int partIndex, int ta
     unsigned rightColSize = requestedColumnsRight.size();
     unsigned resultColSize = requestedColumns.size(); 
     unordered_multimap<uint64_t, uint64_t>* hashTable = hashTables[partIndex];
+    unordered_map<uint64_t, uint64_t> cntMap;
     
     if (leftLength == 0 || length == 0)
         goto probing_finish;
@@ -745,26 +748,62 @@ void Join::probingTask(boost::asio::io_service* ioService, int partIndex, int ta
                 */
             auto range=hashTable->equal_range(rightKey);
             for (auto iter=range.first;iter!=range.second;++iter) {
-                unsigned relColId=0;
-                for (unsigned cId=0;cId<leftColSize;++cId)
-                    localResults[relColId++].push_back(copyLeftData[cId][iter->second]);
-                for (unsigned cId=0;cId<rightColSize;++cId)
-                    localResults[relColId++].push_back(copyRightData[cId][i]);
-                localResults[relColId].push_back(copyLeftData[leftColSize][iter->second]
-                        * copyRightData[rightColSize][i]);
+                if (leftColSize + rightColSize == 1){
+                    auto &copyData((leftColSize == 1) ? copyLeftData[0] : copyRightData[0]);
+                    auto rid = (leftColSize == 1) ? iter->second : i;
+                    auto dup = cntMap.find(copyData[rid]);
+                    if (dup != cntMap.end()){
+                        localResults[1][dup->second] += copyLeftData[leftColSize][iter->second]
+                            * copyRightData[rightColSize][i];
+                    }
+                    else{
+                        localResults[0].push_back(copyData[rid]);
+                        localResults[1].push_back(copyLeftData[leftColSize][iter->second]
+                                * copyRightData[rightColSize][i]);
+                        cntMap.insert(dup, pair<uint64_t, uint64_t>(copyData[rid],
+                                    localResults[1].size()-1));
+                    }
+                }
+                else{
+                    unsigned relColId=0;
+                    for (unsigned cId=0;cId<leftColSize;++cId)
+                        localResults[relColId++].push_back(copyLeftData[cId][iter->second]);
+                    for (unsigned cId=0;cId<rightColSize;++cId)
+                        localResults[relColId++].push_back(copyRightData[cId][i]);
+                    localResults[relColId].push_back(copyLeftData[leftColSize][iter->second]
+                            * copyRightData[rightColSize][i]);
+                }
             }
         }
     } else {
         for (uint64_t i=0; i<leftLength; i++) {
             for (uint64_t j=start; j<limit; j++) {
                 if (leftKeyColumn[i] == rightKeyColumn[j]) {
-                    unsigned relColId=0;
-                    for (unsigned cId=0;cId<leftColSize;++cId)
-                        localResults[relColId++].push_back(copyLeftData[cId][i]);
-                    for (unsigned cId=0;cId<rightColSize;++cId)
-                        localResults[relColId++].push_back(copyRightData[cId][j]);
-                    localResults[relColId].push_back(copyLeftData[leftColSize][i]
-                            * copyRightData[rightColSize][j]);
+                    if (leftColSize + rightColSize == 1){
+                        auto &copyData((leftColSize == 1) ? copyLeftData[0] : copyRightData[0]);
+                        auto rid = (leftColSize == 1) ? i : j;
+                        auto dup = cntMap.find(copyData[rid]);
+                        if (dup != cntMap.end()){
+                            localResults[1][dup->second] += copyLeftData[leftColSize][i]
+                                * copyRightData[rightColSize][j];
+                        }
+                        else{
+                            localResults[0].push_back(copyData[rid]);
+                            localResults[1].push_back(copyLeftData[leftColSize][i]
+                                    * copyRightData[rightColSize][j]);
+                            cntMap.insert(dup, pair<uint64_t, uint64_t>(copyData[rid],
+                                        localResults[1].size()-1));
+                        }
+                    }
+                    else{
+                        unsigned relColId=0;
+                        for (unsigned cId=0;cId<leftColSize;++cId)
+                            localResults[relColId++].push_back(copyLeftData[cId][i]);
+                        for (unsigned cId=0;cId<rightColSize;++cId)
+                            localResults[relColId++].push_back(copyRightData[cId][j]);
+                        localResults[relColId].push_back(copyLeftData[leftColSize][i]
+                                * copyRightData[rightColSize][j]);
+                    }
                 }
             }
         }
