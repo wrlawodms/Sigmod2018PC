@@ -59,9 +59,6 @@ void Scan::asyncRun(boost::asio::io_service& ioService) {
         results[i].addTuples(0, relation.columns[infos[i].colId], relation.size);
         results[i].fix();
     }
-    results.emplace_back(1);
-    results[infos.size()].addTuples(0, relation.countColumn, relation.size);
-    results[infos.size()].fix();
     resultSize=relation.size; 
     finishAsyncRun(ioService, true);
 }
@@ -131,7 +128,12 @@ void FilterScan::createAsyncTasks(boost::asio::io_service& ioService) {
     for (int i=0; i<inputData.size(); i++) {
 		results.emplace_back(cntTask);
     }
-    results.emplace_back(cntTask); // For Count Column
+    if (inputData.size() == 1 &&
+            relation.needCount[select2ResultColId.begin()->first.colId] == 1){
+        // determine Count 
+        counted = true;
+        results.emplace_back(cntTask); // For Count Column
+    }
 	for (int i=0; i<cntTask; i++) {
 		tmpResults.emplace_back();
 	}
@@ -156,7 +158,7 @@ void FilterScan::filterTask(boost::asio::io_service* ioService, int taskIndex, u
     for (int j=0; j<inputData.size(); j++) {
         localResults.emplace_back();
     }
-    if (inputData.size() == 1){
+    if (counted){
         localResults.emplace_back(); // For Count Column
     }
     /*
@@ -173,7 +175,7 @@ void FilterScan::filterTask(boost::asio::io_service* ioService, int taskIndex, u
                 break;
         }
         if (pass) {
-            if (colSize == 1){ // Only one Column will be used
+            if (counted){ // Only one Column will be used
                 auto iter = cntMap.find(inputData[0][i]);
                 if (iter != cntMap.end()){
                     ++localResults[1][iter->second];
@@ -194,19 +196,19 @@ void FilterScan::filterTask(boost::asio::io_service* ioService, int taskIndex, u
     for (unsigned cId=0;cId<colSize;++cId) {
 		results[cId].addTuples(taskIndex, localResults[cId].data(), localResults[cId].size());
     }
-    if (colSize == 1){// Use calculated count column
+    if (counted){// Use calculated count column
         results[colSize].addTuples(taskIndex, localResults[1].data(), localResults[1].size());
-    }
-    else{ // Use naive count column (all elements are 1)
-        results[colSize].addTuples(taskIndex, relation.countColumn, localResults[0].size());
     }
     //resultSize += localResults[0].size();
 	__sync_fetch_and_add(&resultSize, localResults[0].size());
 
     int remainder = __sync_sub_and_fetch(&pendingTask, 1);
     if (remainder == 0) {
-        for (unsigned cId=0;cId<=colSize;++cId) {
+        for (unsigned cId=0;cId<colSize;++cId) {
             results[cId].fix();
+        }
+        if (counted){
+            results[colSize].fix();
         }
         finishAsyncRun(*ioService, true);
     }
@@ -281,6 +283,11 @@ void Join::createAsyncTasks(boost::asio::io_service& ioService) {
     }
     for (auto& info : requestedColumnsRight) {
         select2ResultColId[info]=resColId++;
+    }
+    if (requestedColumnsLeft.size() + requestedColumnsRight.size() == 1 ||
+            left->counted || right->counted){
+        //auto &op = (requestedColumnsLeft.size() == 1) ? 
+        counted = true;
     }
     
     if (left->resultSize == 0) { // no reuslts
@@ -497,7 +504,9 @@ void Join::histogramTask(boost::asio::io_service* ioService, int cntTask, int ta
             for (int i=0; i<requestedColumns.size(); i++) {
                 results.emplace_back(probingResultSize);
             }
-            results.emplace_back(probingResultSize); // For Count
+            if (counted){
+                results.emplace_back(probingResultSize); // For Count Column
+            }
         }
         
 
@@ -587,7 +596,9 @@ void Join::scatteringTask(boost::asio::io_service* ioService, int taskIndex, int
                 for (unsigned cId=0;cId<requestedColumns.size();++cId) {
                     results[cId].fix();
                 }
-                results[requestedColumns.size()].fix();//Count Column
+                if (counted){
+                    results[requestedColumns.size()].fix();//For Count Column
+                }
                 /*
                 if (allocTid == 10) {
                     std::cerr << "Mempool(" << allocTid << ") free requested by " << tid << " addr: " << partitionTable[0] << ", " << partitionTable[1] << std::endl;
@@ -723,15 +734,21 @@ void Join::probingTask(boost::asio::io_service* ioService, int partIndex, int ta
     for (unsigned j=0; j<requestedColumns.size(); j++) {
         localResults.emplace_back();
     }
-    localResults.emplace_back();
+    if (counted){
+        localResults.emplace_back(); // For Count Column
+    }
     for (auto& info : requestedColumnsLeft) {
         copyLeftData.push_back(localLeft[left->resolve(info)]);
     }
-    copyLeftData.push_back(localLeft.back()); // Count Column for left
+    if (left->counted){
+        copyLeftData.push_back(localLeft.back()); // Count Column for left
+    }
     for (auto& info : requestedColumnsRight) {
         copyRightData.push_back(localRight[right->resolve(info)]);
     }
-    copyRightData.push_back(localRight.back()); // Count Column for right
+    if (right->counted){
+        copyRightData.push_back(localRight.back()); // Count Column for right
+    }
     
     if (leftLength > hashThreshold) {   
         // probing
@@ -747,14 +764,14 @@ void Join::probingTask(boost::asio::io_service* ioService, int partIndex, int ta
                     auto &copyData((leftColSize == 1) ? copyLeftData[0] : copyRightData[0]);
                     auto rid = (leftColSize == 1) ? iter->second : i;
                     auto dup = cntMap.find(copyData[rid]);
+                    uint64_t leftCnt = left->counted ? copyLeftData[leftColSize][iter->second] : 1;
+                    uint64_t rightCnt= right->counted ? copyRightData[rightColSize][i] : 1;
                     if (dup != cntMap.end()){
-                        localResults[1][dup->second] += copyLeftData[leftColSize][iter->second]
-                            * copyRightData[rightColSize][i];
+                        localResults[1][dup->second] += leftCnt * rightCnt;
                     }
                     else{
                         localResults[0].push_back(copyData[rid]);
-                        localResults[1].push_back(copyLeftData[leftColSize][iter->second]
-                                * copyRightData[rightColSize][i]);
+                        localResults[1].push_back(leftCnt * rightCnt);
                         cntMap.insert(dup, pair<uint64_t, uint64_t>(copyData[rid],
                                     localResults[1].size()-1));
                     }
@@ -765,8 +782,11 @@ void Join::probingTask(boost::asio::io_service* ioService, int partIndex, int ta
                         localResults[relColId++].push_back(copyLeftData[cId][iter->second]);
                     for (unsigned cId=0;cId<rightColSize;++cId)
                         localResults[relColId++].push_back(copyRightData[cId][i]);
-                    localResults[relColId].push_back(copyLeftData[leftColSize][iter->second]
-                            * copyRightData[rightColSize][i]);
+                    if (counted){
+                        uint64_t leftCnt = left->counted ? copyLeftData[leftColSize][iter->second] : 1;
+                        uint64_t rightCnt= right->counted ? copyRightData[rightColSize][i] : 1;
+                        localResults[relColId].push_back(leftCnt * rightCnt);
+                    }
                 }
             }
         }
@@ -778,14 +798,14 @@ void Join::probingTask(boost::asio::io_service* ioService, int partIndex, int ta
                         auto &copyData((leftColSize == 1) ? copyLeftData[0] : copyRightData[0]);
                         auto rid = (leftColSize == 1) ? i : j;
                         auto dup = cntMap.find(copyData[rid]);
+                        uint64_t leftCnt = left->counted ? copyLeftData[leftColSize][i] : 1;
+                        uint64_t rightCnt= right->counted ? copyRightData[rightColSize][j] : 1;
                         if (dup != cntMap.end()){
-                            localResults[1][dup->second] += copyLeftData[leftColSize][i]
-                                * copyRightData[rightColSize][j];
+                            localResults[1][dup->second] += leftCnt * rightCnt;
                         }
                         else{
                             localResults[0].push_back(copyData[rid]);
-                            localResults[1].push_back(copyLeftData[leftColSize][i]
-                                    * copyRightData[rightColSize][j]);
+                            localResults[1].push_back(leftCnt * rightCnt);
                             cntMap.insert(dup, pair<uint64_t, uint64_t>(copyData[rid],
                                         localResults[1].size()-1));
                         }
@@ -796,8 +816,11 @@ void Join::probingTask(boost::asio::io_service* ioService, int partIndex, int ta
                             localResults[relColId++].push_back(copyLeftData[cId][i]);
                         for (unsigned cId=0;cId<rightColSize;++cId)
                             localResults[relColId++].push_back(copyRightData[cId][j]);
-                        localResults[relColId].push_back(copyLeftData[leftColSize][i]
-                                * copyRightData[rightColSize][j]);
+                        if (counted){
+                            uint64_t leftCnt = left->counted ? copyLeftData[leftColSize][i] : 1;
+                            uint64_t rightCnt= right->counted ? copyRightData[rightColSize][j] : 1;
+                            localResults[relColId].push_back(leftCnt * rightCnt);
+                        }
                     }
                 }
             }
@@ -811,8 +834,10 @@ void Join::probingTask(boost::asio::io_service* ioService, int partIndex, int ta
     for (unsigned i=0; i<resultColSize; i++) {
 		results[i].addTuples(resultIndex[partIndex]+taskIndex, localResults[i].data(), localResults[i].size());
     }
-    results[resultColSize].addTuples(resultIndex[partIndex]+taskIndex,
-            localResults[resultColSize].data(), localResults[resultColSize].size());
+    if (counted){
+        results[resultColSize].addTuples(resultIndex[partIndex]+taskIndex,
+                localResults[resultColSize].data(), localResults[resultColSize].size());
+    }
 	__sync_fetch_and_add(&resultSize, localResults[0].size());
 //    resultSize += localResults[0].size();
 
@@ -827,7 +852,9 @@ probing_finish:
         for (unsigned cId=0;cId<requestedColumns.size();++cId) {
             results[cId].fix();
         }
-        results[requestedColumns.size()].fix();
+        if (counted){
+            results[requestedColumns.size()].fix();
+        }
 /*
         vector<unordered_multimap<uint64_t, uint64_t>*> gHashTables = move(hashTables);
         unsigned gCntPartition = cntPartition;
@@ -902,6 +929,9 @@ void SelfJoin::selfJoinTask(boost::asio::io_service* ioService, int taskIndex, u
     for (int j=0; j<colSize; j++) {
         localResults.emplace_back();
     }
+    if (counted && !input->counted){
+        localResults.emplace_back();
+    }
     
     for (unsigned i=0; i<colSize; i++) {
         colIt.push_back(copyData[i]->begin(start));
@@ -909,18 +939,21 @@ void SelfJoin::selfJoinTask(boost::asio::io_service* ioService, int taskIndex, u
     unordered_map<uint64_t, uint64_t> cntMap;
     for (uint64_t i=start, limit=start+length;i<limit;++i) {
         if (*leftColIt==*rightColIt) {
-            if (colSize == 2){ // Already count Column is included
+            if (colSize - input->counted == 1){ // 1 0 / 2 1
+                assert(counted);
                 auto dup = cntMap.find(*(colIt[0]));
+                uint64_t dupCnt = (input->counted) ? *(colIt[1]) : 1;
                 if (dup != cntMap.end()){
-                    localResults[1][dup->second] += *(colIt[1]);
+                    localResults[1][dup->second] += dupCnt;
                 }
                 else{
                     localResults[0].push_back(*(colIt[0]));
-                    localResults[1].push_back(*(colIt[1]));
-                    cntMap.insert(dup, pair<uint64_t, uint64_t>(*(colIt[0]), *(colIt[1])));
+                    localResults[1].push_back(dupCnt);
+                    cntMap.insert(dup, pair<uint64_t, uint64_t>(*(colIt[0]), localResults[1].size()-1));
                 }
             }
-            else{
+            else{ // 2 0 / 3 0 / 3 1 / 4 0 / 4 1 ...
+                // If counted is true, colSize already contains count Column
                 for (unsigned cId=0;cId<colSize;++cId) {
                     localResults[cId].push_back(*(colIt[cId]));
                 }
@@ -936,12 +969,18 @@ void SelfJoin::selfJoinTask(boost::asio::io_service* ioService, int taskIndex, u
     for (int i=0; i<colSize; i++) {
         results[i].addTuples(taskIndex, localResults[i].data(), localResults[i].size());
     }
+    if (counted && !input->counted){
+        results[colSize].addTuples(taskIndex, localResults[colSize].data(), localResults[colSize].size());
+    }
 	__sync_fetch_and_add(&resultSize, localResults[0].size());
 
     int remainder = __sync_sub_and_fetch(&pendingTask, 1);
     if (UNLIKELY(remainder == 0)) {
         for (unsigned cId=0;cId<colSize;++cId) {
             results[cId].fix();
+        }
+        if (counted && !input->counted){
+            results[colSize].fix();
         }
         finishAsyncRun(*ioService, true);
         //input = nullptr;
@@ -979,8 +1018,13 @@ void SelfJoin::createAsyncTasks(boost::asio::io_service& ioService) {
         select2ResultColId.emplace(iu,copyData.size()-1);
 		results.emplace_back(cntTask);
     }
-    copyData.emplace_back(&inputData.back());
-    results.emplace_back(cntTask);
+    if (copyData.size() == 1 || input->counted){
+        if (input->counted){
+            copyData.emplace_back(&inputData.back());
+        }
+        counted = true;
+        results.emplace_back(cntTask);
+    }
 
     for (int i=0; i<cntTask; i++) {
         tmpResults.emplace_back();
@@ -1022,10 +1066,17 @@ void Checksum::checksumTask(boost::asio::io_service* ioService, int taskIndex, u
     for (auto& sInfo : colInfo) {
         auto colId = input->resolve(sInfo);
         auto inputColIt = inputData[colId].begin(start);
-        auto countColIt = inputData.back().begin(start);
         uint64_t sum=0;
-        for (int i=0; i<length; i++,++inputColIt,++countColIt){
-            sum += (*inputColIt) * (*countColIt);
+        if (input->counted){
+            auto countColIt = inputData.back().begin(start);
+            for (int i=0; i<length; i++,++inputColIt,++countColIt){
+                sum += (*inputColIt) * (*countColIt);
+            }
+        }
+        else{
+            for (int i=0; i<length; i++,++inputColIt){
+                sum += (*inputColIt);
+            }
         }
         __sync_fetch_and_add(&checkSums[sumIndex++], sum);
     }

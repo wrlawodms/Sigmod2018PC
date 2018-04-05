@@ -59,6 +59,7 @@ protected:
     virtual void finishAsyncRun(boost::asio::io_service& ioService, bool startParentAsync=false); 
 
 public:
+    bool counted = false;
 #ifdef VERBOSE
     unsigned operatorIndex;
     unsigned queryIndex;
