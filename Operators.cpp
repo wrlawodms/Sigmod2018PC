@@ -906,10 +906,24 @@ void SelfJoin::selfJoinTask(boost::asio::io_service* ioService, int taskIndex, u
     for (unsigned i=0; i<colSize; i++) {
         colIt.push_back(copyData[i]->begin(start));
     }
+    unordered_map<uint64_t, uint64_t> cntMap;
     for (uint64_t i=start, limit=start+length;i<limit;++i) {
         if (*leftColIt==*rightColIt) {
-            for (unsigned cId=0;cId<colSize;++cId) {
-                localResults[cId].push_back(*(colIt[cId]));
+            if (colSize == 2){ // Already count Column is included
+                auto dup = cntMap.find(*(colIt[0]));
+                if (dup != cntMap.end()){
+                    localResults[1][dup->second] += *(colIt[1]);
+                }
+                else{
+                    localResults[0].push_back(*(colIt[0]));
+                    localResults[1].push_back(*(colIt[1]));
+                    cntMap.insert(dup, pair<uint64_t, uint64_t>(*(colIt[0]), *(colIt[1])));
+                }
+            }
+            else{
+                for (unsigned cId=0;cId<colSize;++cId) {
+                    localResults[cId].push_back(*(colIt[cId]));
+                }
             }
         }
         ++leftColIt;
