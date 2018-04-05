@@ -24,6 +24,7 @@ int main(int argc, char* argv[]) {
         if (line == "Done") break;
         joiner.addRelation(line.c_str());
     }
+    joiner.loadStat();
     //chrono::steady_clock::time_point begin = chrono::steady_clock::now();
 
 /*    

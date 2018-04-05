@@ -204,3 +204,30 @@ void Joiner::createAsyncQueryTask(string line)
     ioService.post(bind(&Joiner::join, this, query, nextQueryIndex)); 
     __sync_fetch_and_add(&nextQueryIndex, 1);
 }
+//---------------------------------------------------------------------------
+void Joiner::loadStat()
+{
+    for (auto &r : relations){
+        for (unsigned i = 0; i < r.columns.size(); ++i){
+            ioService.post(bind(&Relation::loadStat, &r, i)); 
+        }
+    }
+    while(1){
+        bool done = true;
+        for (auto &r : relations){
+            for (unsigned i = 0; i < r.columns.size(); ++i){
+                if (r.needCount[i] == 0){
+                    done = false;
+                    break;
+                }
+            }
+            if (!done){
+                break;
+            }
+        }
+        if (done){
+            break;
+        }
+        usleep(100000);
+    }
+}

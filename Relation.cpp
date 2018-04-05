@@ -4,7 +4,9 @@
 #include <sys/mman.h>
 #include <sys/stat.h>
 #include <algorithm>
+#include <unordered_set>
 #include "Relation.hpp"
+#include "Config.hpp"
 //---------------------------------------------------------------------------
 using namespace std;
 //---------------------------------------------------------------------------
@@ -87,6 +89,7 @@ void Relation::loadRelation(const char* fileName)
     }
     countColumn = new uint64_t[size];
     fill_n(countColumn, size, 1);
+    needCount.resize(numColumns);
 }
 //---------------------------------------------------------------------------
 Relation::Relation(const char* fileName) : ownsMemory(false)
@@ -104,3 +107,12 @@ Relation::~Relation()
     }
 }
 //---------------------------------------------------------------------------
+void Relation::loadStat(unsigned colId)
+{
+    auto &c(columns[colId]);
+    unordered_set<uint64_t> cntSet;
+    for (unsigned i = 0; i < size; i+=STAT_SAMPLE){
+        cntSet.insert(c[i]);
+    }
+    needCount[colId] = ((size / cntSet.size()) >= COUNT_THRESHOLD) ? 1 : -1;
+}

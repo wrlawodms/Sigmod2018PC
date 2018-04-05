@@ -18,6 +18,7 @@ public:
     /// The join column containing the keys
     std::vector<uint64_t*> columns;
     uint64_t *countColumn;
+    std::vector<int> needCount;
 
     /// Stores a relation into a file (binary)
     void storeRelation(const std::string& fileName);
@@ -25,6 +26,8 @@ public:
     void storeRelationCSV(const std::string& fileName);
     /// Dump SQL: Create and load table (PostgreSQL)
     void dumpSQL(const std::string& fileName,unsigned relationId);
+
+    void loadStat(unsigned colId);
 
     /// Constructor without mmap
     Relation(uint64_t size,std::vector<uint64_t*>&& columns) : ownsMemory(true), size(size), columns(columns) {}
