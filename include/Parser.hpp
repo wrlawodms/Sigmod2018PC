@@ -108,6 +108,7 @@ private:
     void resolveRelationIds();
     void addFilterPredicates();
     void reorderPredicates();
+    void applyCntColumnId();
 
 public:
     /// Parse relation ids <r1> <r2> ...

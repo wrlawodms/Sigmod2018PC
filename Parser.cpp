@@ -148,6 +148,22 @@ void QueryInfo::resolveRelationIds()
     }
 }
 //---------------------------------------------------------------------------
+void QueryInfo::applyCntColumnId() {
+    for (auto& sInfo : selections) {
+        sInfo.colId++;
+    }
+    // Predicates
+    for (auto& pInfo : predicates) {
+        pInfo.left.colId++;
+        pInfo.right.colId++;
+    }
+    // Filters
+    for (auto& fInfo : filters) {
+        fInfo.filterColumn.colId++;
+    }
+}
+
+//---------------------------------------------------------------------------
 void QueryInfo::reorderPredicates() {
     sort(predicates.begin(), predicates.end(), [&](const PredicateInfo& a, const PredicateInfo& b) -> bool {
         int aScore = 0;
@@ -201,6 +217,7 @@ void QueryInfo::parseQuery(string& rawQuery)
     */
     parseSelections(queryParts[2]);
     resolveRelationIds();
+    applyCntColumnId();
 }
 //---------------------------------------------------------------------------
 void QueryInfo::clear()

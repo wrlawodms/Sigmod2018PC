@@ -80,6 +80,7 @@ void Relation::loadRelation(const char* fileName)
     addr+=sizeof(size);
     auto numColumns=*reinterpret_cast<size_t*>(addr);
     addr+=sizeof(size_t);
+    this->columns.push_back(reinterpret_cast<uint64_t*>(malloc(sizeof(uint64_t)*size)));
     for (unsigned i=0;i<numColumns;++i) {
         this->columns.push_back(reinterpret_cast<uint64_t*>(addr));
         addr+=size*sizeof(uint64_t);
