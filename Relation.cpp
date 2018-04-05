@@ -87,9 +87,7 @@ void Relation::loadRelation(const char* fileName)
         this->columns.push_back(reinterpret_cast<uint64_t*>(addr));
         addr+=size*sizeof(uint64_t);
     }
-    countColumn = new uint64_t[size];
-    fill_n(countColumn, size, 1);
-    needCount.resize(numColumns);
+    needCount.resize(numColumns, -1);
 }
 //---------------------------------------------------------------------------
 Relation::Relation(const char* fileName) : ownsMemory(false)
@@ -114,5 +112,5 @@ void Relation::loadStat(unsigned colId)
     for (unsigned i = 0; i < size; i+=STAT_SAMPLE){
         cntSet.insert(c[i]);
     }
-    needCount[colId] = ((size / cntSet.size()) >= COUNT_THRESHOLD) ? 1 : -1;
+    needCount[colId] = ((size / cntSet.size()) >= COUNT_THRESHOLD);
 }

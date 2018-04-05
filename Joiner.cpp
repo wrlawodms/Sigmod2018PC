@@ -217,7 +217,7 @@ void Joiner::loadStat()
         bool done = true;
         for (auto &r : relations){
             for (unsigned i = 0; i < r.columns.size(); ++i){
-                if (r.needCount[i] == 0){
+                if (r.needCount[i] == -1){
                     done = false;
                     break;
                 }

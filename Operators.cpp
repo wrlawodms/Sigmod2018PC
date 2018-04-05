@@ -129,9 +129,9 @@ void FilterScan::createAsyncTasks(boost::asio::io_service& ioService) {
 		results.emplace_back(cntTask);
     }
     if (inputData.size() == 1 &&
-            relation.needCount[select2ResultColId.begin()->first.colId] == 1){
+            relation.needCount[select2ResultColId.begin()->first.colId]){
         // determine Count 
-        counted = true;
+        counted = 1;
         results.emplace_back(cntTask); // For Count Column
     }
 	for (int i=0; i<cntTask; i++) {
@@ -284,10 +284,13 @@ void Join::createAsyncTasks(boost::asio::io_service& ioService) {
     for (auto& info : requestedColumnsRight) {
         select2ResultColId[info]=resColId++;
     }
-    if (requestedColumnsLeft.size() + requestedColumnsRight.size() == 1 ||
-            left->counted || right->counted){
-        //auto &op = (requestedColumnsLeft.size() == 1) ? 
-        counted = true;
+    if (requestedColumnsLeft.size() + requestedColumnsRight.size() == 1){
+        auto &sInfo(requestedColumnsLeft.size() == 1 ?
+                requestedColumnsLeft[0] : requestedColumnsRight[0]);
+        counted = Joiner::relations[sInfo.relId].needCount[sInfo.colId];
+    }
+    if ((left->counted || right->counted) && !counted){
+        counted = 2;
     }
     
     if (left->resultSize == 0) { // no reuslts
@@ -760,7 +763,7 @@ void Join::probingTask(boost::asio::io_service* ioService, int partIndex, int ta
                 */
             auto range=hashTable->equal_range(rightKey);
             for (auto iter=range.first;iter!=range.second;++iter) {
-                if (leftColSize + rightColSize == 1){
+                if (counted == 1){
                     auto &copyData((leftColSize == 1) ? copyLeftData[0] : copyRightData[0]);
                     auto rid = (leftColSize == 1) ? iter->second : i;
                     auto dup = cntMap.find(copyData[rid]);
@@ -794,7 +797,7 @@ void Join::probingTask(boost::asio::io_service* ioService, int partIndex, int ta
         for (uint64_t i=0; i<leftLength; i++) {
             for (uint64_t j=start; j<limit; j++) {
                 if (leftKeyColumn[i] == rightKeyColumn[j]) {
-                    if (leftColSize + rightColSize == 1){
+                    if (counted == 1){
                         auto &copyData((leftColSize == 1) ? copyLeftData[0] : copyRightData[0]);
                         auto rid = (leftColSize == 1) ? i : j;
                         auto dup = cntMap.find(copyData[rid]);
@@ -939,8 +942,7 @@ void SelfJoin::selfJoinTask(boost::asio::io_service* ioService, int taskIndex, u
     unordered_map<uint64_t, uint64_t> cntMap;
     for (uint64_t i=start, limit=start+length;i<limit;++i) {
         if (*leftColIt==*rightColIt) {
-            if (colSize - input->counted == 1){ // 1 0 / 2 1
-                assert(counted);
+            if (counted == 1){
                 auto dup = cntMap.find(*(colIt[0]));
                 uint64_t dupCnt = (input->counted) ? *(colIt[1]) : 1;
                 if (dup != cntMap.end()){
@@ -1018,11 +1020,17 @@ void SelfJoin::createAsyncTasks(boost::asio::io_service& ioService) {
         select2ResultColId.emplace(iu,copyData.size()-1);
 		results.emplace_back(cntTask);
     }
-    if (copyData.size() == 1 || input->counted){
-        if (input->counted){
-            copyData.emplace_back(&inputData.back());
+    if (copyData.size() == 1){
+        auto &sInfo(*(requiredIUs.begin()));
+        counted = Joiner::relations[sInfo.relId].needCount[sInfo.colId];
+    }
+    if (input->counted){
+        if (!counted){
+            counted = 2;
         }
-        counted = true;
+        copyData.emplace_back(&inputData.back());
+    }
+    if (counted){
         results.emplace_back(cntTask);
     }
 
