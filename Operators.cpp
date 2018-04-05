@@ -659,16 +659,11 @@ void Join::buildingTask(boost::asio::io_service* ioService, int taskIndex, vecto
     if (limitLeft > hashThreshold) {
         hashTables[taskIndex] = new unordered_multimap<uint64_t, uint64_t>();
         unordered_multimap<uint64_t, uint64_t>* hashTable = hashTables[taskIndex];
-        std::vector<uint64_t*> copyLeftData; //,copyRightData;
         //vector<vector<uint64_t>>& localResults = tmpResults[taskIndex];
         uint64_t* leftKeyColumn = localLeft[leftColId];
     //    uint64_t* rightKeyColumn = localRight[rightColId];
 
         //bloom_filter bloomFilter(bloomArgs);
-
-        for (auto& info : requestedColumnsLeft) {
-            copyLeftData.push_back(localLeft[left->resolve(info)]);
-        }
 
         // building
         //hashTable.reserve(limitLeft);
@@ -732,11 +727,11 @@ void Join::probingTask(boost::asio::io_service* ioService, int partIndex, int ta
     for (auto& info : requestedColumnsLeft) {
         copyLeftData.push_back(localLeft[left->resolve(info)]);
     }
-    copyLeftData.push_back(localLeft.back());
+    copyLeftData.push_back(localLeft.back()); // Count Column for left
     for (auto& info : requestedColumnsRight) {
         copyRightData.push_back(localRight[right->resolve(info)]);
     }
-    copyRightData.push_back(localRight.back());
+    copyRightData.push_back(localRight.back()); // Count Column for right
     
     if (leftLength > hashThreshold) {   
         // probing
