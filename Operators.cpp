@@ -128,10 +128,10 @@ void FilterScan::createAsyncTasks(boost::asio::io_service& ioService) {
     
     pendingTask = cntTask;
     
-    inputData.push_back(relation.countColumn);
     for (int i=0; i<inputData.size(); i++) {
 		results.emplace_back(cntTask);
     }
+    results.emplace_back(cntTask); // For Count Column
 	for (int i=0; i<cntTask; i++) {
 		tmpResults.emplace_back();
 	}
@@ -156,12 +156,16 @@ void FilterScan::filterTask(boost::asio::io_service* ioService, int taskIndex, u
     for (int j=0; j<inputData.size(); j++) {
         localResults.emplace_back();
     }
+    if (inputData.size() == 1){
+        localResults.emplace_back(); // For Count Column
+    }
     /*
     for (unsigned cId=0;cId<inputData.size();++cId) {
         localResults[cId].reserve(length);
     }*/
 
     unsigned colSize = inputData.size();
+    unordered_map<uint64_t, unsigned> cntMap;
     for (uint64_t i=start;i<start+length;++i) {
         bool pass=true;
         for (auto& f : filters) {
@@ -169,20 +173,39 @@ void FilterScan::filterTask(boost::asio::io_service* ioService, int taskIndex, u
                 break;
         }
         if (pass) {
-            for (unsigned cId=0;cId<colSize;++cId)
-                localResults[cId].push_back(inputData[cId][i]);
+            if (colSize == 1){ // Only one Column will be used
+                auto iter = cntMap.find(inputData[0][i]);
+                if (iter != cntMap.end()){
+                    ++localResults[1][iter->second];
+                }
+                else{
+                    localResults[0].push_back(inputData[0][i]);
+                    localResults[1].push_back(1);
+                    cntMap.insert(iter, pair<uint64_t, unsigned>(inputData[0][i], localResults[1].size()-1));
+                }
+            }
+            else{
+                for (unsigned cId=0;cId<colSize;++cId)
+                    localResults[cId].push_back(inputData[cId][i]);
+            }
         }
     }
 
     for (unsigned cId=0;cId<colSize;++cId) {
 		results[cId].addTuples(taskIndex, localResults[cId].data(), localResults[cId].size());
     }
+    if (colSize == 1){// Use calculated count column
+        results[colSize].addTuples(taskIndex, localResults[1].data(), localResults[1].size());
+    }
+    else{ // Use naive count column (all elements are 1)
+        results[colSize].addTuples(taskIndex, relation.countColumn, localResults[0].size());
+    }
     //resultSize += localResults[0].size();
 	__sync_fetch_and_add(&resultSize, localResults[0].size());
 
     int remainder = __sync_sub_and_fetch(&pendingTask, 1);
     if (remainder == 0) {
-        for (unsigned cId=0;cId<colSize;++cId) {
+        for (unsigned cId=0;cId<=colSize;++cId) {
             results[cId].fix();
         }
         finishAsyncRun(*ioService, true);
