@@ -59,6 +59,9 @@ void Scan::asyncRun(boost::asio::io_service& ioService) {
         results[i].addTuples(0, relation.columns[infos[i].colId], relation.size);
         results[i].fix();
     }
+    results.emplace_back(1);
+    results[infos.size()].addTuples(0, relation.countColumn, relation.size);
+    results[infos.size()].fix();
     resultSize=relation.size; 
     finishAsyncRun(ioService, true);
 }
@@ -125,6 +128,7 @@ void FilterScan::createAsyncTasks(boost::asio::io_service& ioService) {
     
     pendingTask = cntTask;
     
+    inputData.push_back(relation.countColumn);
     for (int i=0; i<inputData.size(); i++) {
 		results.emplace_back(cntTask);
     }
@@ -300,10 +304,10 @@ void Join::createAsyncTasks(boost::asio::io_service& ioService) {
     pendingPartitioning = 2;
 //    partitionTable[0] = (uint64_t*)malloc(left->getResultsSize());
 //    partitionTable[1] = (uint64_t*)malloc(right->getResultsSize());
-//    partitionTable[0] = (uint64_t*)aligned_alloc(CACHE_LINE_SIZE, left->getResultsSize());
-//    partitionTable[1] = (uint64_t*)aligned_alloc(CACHE_LINE_SIZE, right->getResultsSize());
-    partitionTable[0] = (uint64_t*)localMemPool[tid]->alloc(left->getResultsSize());
-    partitionTable[1] = (uint64_t*)localMemPool[tid]->alloc(right->getResultsSize());
+    partitionTable[0] = (uint64_t*)aligned_alloc(CACHE_LINE_SIZE, left->getResultsSize());
+    partitionTable[1] = (uint64_t*)aligned_alloc(CACHE_LINE_SIZE, right->getResultsSize());
+//    partitionTable[0] = (uint64_t*)localMemPool[tid]->alloc(left->getResultsSize());
+//    partitionTable[1] = (uint64_t*)localMemPool[tid]->alloc(right->getResultsSize());
     allocTid = tid; 
 /*
     if (left->getResultsSize() > 2*1024*1024) 
@@ -470,6 +474,7 @@ void Join::histogramTask(boost::asio::io_service* ioService, int cntTask, int ta
             for (int i=0; i<requestedColumns.size(); i++) {
                 results.emplace_back(probingResultSize);
             }
+            results.emplace_back(probingResultSize); // For Count
         }
         
 
@@ -559,13 +564,16 @@ void Join::scatteringTask(boost::asio::io_service* ioService, int taskIndex, int
                 for (unsigned cId=0;cId<requestedColumns.size();++cId) {
                     results[cId].fix();
                 }
+                results[requestedColumns.size()].fix();//Count Column
                 /*
                 if (allocTid == 10) {
                     std::cerr << "Mempool(" << allocTid << ") free requested by " << tid << " addr: " << partitionTable[0] << ", " << partitionTable[1] << std::endl;
                 }
                 */
-                localMemPool[allocTid]->requestFree(partitionTable[0]);
-                localMemPool[allocTid]->requestFree(partitionTable[1]);
+                free(partitionTable[0]);
+                free(partitionTable[1]);
+//                localMemPool[allocTid]->requestFree(partitionTable[0]);
+//                localMemPool[allocTid]->requestFree(partitionTable[1]);
                 finishAsyncRun(*ioService, true); 
                 //left = nullptr;
                 //right = nullptr; 
@@ -694,12 +702,15 @@ void Join::probingTask(boost::asio::io_service* ioService, int partIndex, int ta
     for (unsigned j=0; j<requestedColumns.size(); j++) {
         localResults.emplace_back();
     }
+    localResults.emplace_back();
     for (auto& info : requestedColumnsLeft) {
         copyLeftData.push_back(localLeft[left->resolve(info)]);
     }
+    copyLeftData.push_back(localLeft.back());
     for (auto& info : requestedColumnsRight) {
         copyRightData.push_back(localRight[right->resolve(info)]);
     }
+    copyRightData.push_back(localRight.back());
     
     if (leftLength > hashThreshold) {   
         // probing
@@ -716,6 +727,8 @@ void Join::probingTask(boost::asio::io_service* ioService, int partIndex, int ta
                     localResults[relColId++].push_back(copyLeftData[cId][iter->second]);
                 for (unsigned cId=0;cId<rightColSize;++cId)
                     localResults[relColId++].push_back(copyRightData[cId][i]);
+                localResults[relColId].push_back(copyLeftData[leftColSize][iter->second]
+                        * copyRightData[rightColSize][i]);
             }
         }
     } else {
@@ -727,6 +740,8 @@ void Join::probingTask(boost::asio::io_service* ioService, int partIndex, int ta
                         localResults[relColId++].push_back(copyLeftData[cId][i]);
                     for (unsigned cId=0;cId<rightColSize;++cId)
                         localResults[relColId++].push_back(copyRightData[cId][j]);
+                    localResults[relColId].push_back(copyLeftData[leftColSize][i]
+                            * copyRightData[rightColSize][j]);
                 }
             }
         }
@@ -736,9 +751,11 @@ void Join::probingTask(boost::asio::io_service* ioService, int partIndex, int ta
 #endif
     if (localResults[0].size() == 0) 
         goto probing_finish;
-    for (unsigned i=0; i<resultColSize; i++)  {
+    for (unsigned i=0; i<resultColSize; i++) {
 		results[i].addTuples(resultIndex[partIndex]+taskIndex, localResults[i].data(), localResults[i].size());
     }
+    results[resultColSize].addTuples(resultIndex[partIndex]+taskIndex,
+            localResults[resultColSize].data(), localResults[resultColSize].size());
 	__sync_fetch_and_add(&resultSize, localResults[0].size());
 //    resultSize += localResults[0].size();
 
@@ -753,6 +770,7 @@ probing_finish:
         for (unsigned cId=0;cId<requestedColumns.size();++cId) {
             results[cId].fix();
         }
+        results[requestedColumns.size()].fix();
 /*
         vector<unordered_multimap<uint64_t, uint64_t>*> gHashTables = move(hashTables);
         unsigned gCntPartition = cntPartition;
@@ -764,8 +782,10 @@ probing_finish:
             std::cerr << "Mempool(" << allocTid << ") free requested by " << tid << " addr: " <<partitionTable[0] << ", " << partitionTable[1] << endl;
         }
         */
-        localMemPool[allocTid]->requestFree(partitionTable[0]);
-        localMemPool[allocTid]->requestFree(partitionTable[1]);
+        free(partitionTable[0]);
+        free(partitionTable[1]);
+//        localMemPool[allocTid]->requestFree(partitionTable[0]);
+//        localMemPool[allocTid]->requestFree(partitionTable[1]);
         finishAsyncRun(*ioService, true); 
         
         //left = nullptr;
@@ -888,6 +908,8 @@ void SelfJoin::createAsyncTasks(boost::asio::io_service& ioService) {
         select2ResultColId.emplace(iu,copyData.size()-1);
 		results.emplace_back(cntTask);
     }
+    copyData.emplace_back(&inputData.back());
+    results.emplace_back(cntTask);
 
     for (int i=0; i<cntTask; i++) {
         tmpResults.emplace_back();
@@ -929,9 +951,11 @@ void Checksum::checksumTask(boost::asio::io_service* ioService, int taskIndex, u
     for (auto& sInfo : colInfo) {
         auto colId = input->resolve(sInfo);
         auto inputColIt = inputData[colId].begin(start);
+        auto countColIt = inputData.back().begin(start);
         uint64_t sum=0;
-        for (int i=0; i<length; i++,++inputColIt)
-            sum += *inputColIt;
+        for (int i=0; i<length; i++,++inputColIt,++countColIt){
+            sum += (*inputColIt) * (*countColIt);
+        }
         __sync_fetch_and_add(&checkSums[sumIndex++], sum);
     }
     

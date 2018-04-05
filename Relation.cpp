@@ -3,6 +3,7 @@
 #include <fstream>
 #include <sys/mman.h>
 #include <sys/stat.h>
+#include <algorithm>
 #include "Relation.hpp"
 //---------------------------------------------------------------------------
 using namespace std;
@@ -84,6 +85,8 @@ void Relation::loadRelation(const char* fileName)
         this->columns.push_back(reinterpret_cast<uint64_t*>(addr));
         addr+=size*sizeof(uint64_t);
     }
+    countColumn = new uint64_t[size];
+    fill_n(countColumn, size, 1);
 }
 //---------------------------------------------------------------------------
 Relation::Relation(const char* fileName) : ownsMemory(false)
