@@ -73,7 +73,7 @@ class Joiner {
         }
     }
     /// The relations that might be joined
-    std::vector<Relation> relations;
+    static std::vector<Relation> relations;
     /// Add relation
     void addRelation(const char* fileName);
     /// Get relation

@@ -12,6 +12,7 @@
 //---------------------------------------------------------------------------
 using namespace std;
 //---------------------------------------------------------------------------
+std::vector<Relation> Joiner::relations;
 void Joiner::addRelation(const char* fileName)
 // Loads a relation from disk
 {
