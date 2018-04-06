@@ -109,8 +109,9 @@ void Relation::loadStat(unsigned colId)
 {
     auto &c(columns[colId]);
     unordered_set<uint64_t> cntSet;
-    for (unsigned i = 0; i < size; i+=STAT_SAMPLE){
+    const unsigned stat_sample = size/SAMPLING_CNT == 0 ? 1 : size/SAMPLING_CNT ;
+    for (unsigned i = 0; i < size; i+=stat_sample){
         cntSet.insert(c[i]);
     }
-    needCount[colId] = ((size / STAT_SAMPLE / cntSet.size()) >= COUNT_THRESHOLD);
+    needCount[colId] = ((size / stat_sample / cntSet.size()) >= COUNT_THRESHOLD);
 }

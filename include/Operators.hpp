@@ -193,7 +193,9 @@ class Join : public Operator {
     std::vector<std::vector<uint64_t>> histograms[2]; // [LR][taskIndex][partitionIndex], 각 파티션에 대한 벡터는 heap에 allocate되나? 안그럼 invalidate storㅇ이 일어날거 같은데
     std::vector<uint64_t> partitionLength[2]; // #tuples per each partition
 
-    std::vector<std::unordered_multimap<uint64_t, uint64_t>*> hashTables; // for using thread local storage 
+    std::vector<std::unordered_multimap<uint64_t, uint64_t>*> hashTablesIndices; // for using thread local storage 
+    std::vector<std::unordered_map<uint64_t, uint64_t>*> hashTablesCnt; // for using thread local storage 
+    bool cntBuilding = false;
 
     void histogramTask(boost::asio::io_service* ioService, int cntTask, int taskIndex, int leftOrRight, uint64_t start, uint64_t length);
     void scatteringTask(boost::asio::io_service* ioService, int taskIndex, int leftOrRight, uint64_t start, uint64_t length); 
@@ -222,8 +224,8 @@ public:
 
 //        free(partitionTable[0]);
 //        free(partitionTable[1]);
-        if (!hashTables.size())
-            return;
+//        if (!hashTables.size())
+//            return;
 /*
         for (unsigned i=0; i<cntPartition; i++) {
             if(hashTables[i] != NULL)

@@ -290,6 +290,12 @@ void Join::createAsyncTasks(boost::asio::io_service& ioService) {
     for (auto& info : requestedColumnsRight) {
         select2ResultColId[info]=resColId++;
     }
+    
+    if (requestedColumnsLeft.size() == 0 ||
+        (requestedColumnsLeft.size() == 1 && requestedColumnsLeft[0] == pInfo.left)) {
+        cntBuilding = true;
+    }
+
     if (requestedColumnsLeft.size() + requestedColumnsRight.size() == 1){
         auto &sInfo(requestedColumnsLeft.size() == 1 ?
                 requestedColumnsLeft[0] : requestedColumnsRight[0]);
@@ -299,7 +305,7 @@ void Join::createAsyncTasks(boost::asio::io_service& ioService) {
             __sync_fetch_and_add(&cntCounted, 1);
 #endif
     }
-    if ((left->counted || right->counted) && !counted){
+    if ((left->counted || right->counted || cntBuilding) && !counted ){
         counted = 2;
 #ifdef ANALYZE
         __sync_fetch_and_add(&cntCounted, 1);
@@ -630,10 +636,16 @@ void Join::scatteringTask(boost::asio::io_service* ioService, int taskIndex, int
                 return;         
             }
             for (int i=0; i<cntPartition; i++) {
-                hashTables.emplace_back();
+                if (cntBuilding)
+                    hashTablesCnt.emplace_back();
+                else
+                    hashTablesIndices.emplace_back();
             }
             for (int i=0; i<cntPartition; i++) {
-                hashTables[i] = NULL;
+                if (cntBuilding)
+                    hashTablesCnt[i] = NULL;
+                else
+                    hashTablesIndices[i] = NULL;
             }
             pendingBuilding = subJoinTarget.size();
             unsigned taskNum = pendingBuilding;
@@ -684,20 +696,28 @@ void Join::buildingTask(boost::asio::io_service* ioService, int taskIndex, vecto
         */
     }
     if (limitLeft > hashThreshold) {
-        hashTables[taskIndex] = new unordered_multimap<uint64_t, uint64_t>();
-        unordered_multimap<uint64_t, uint64_t>* hashTable = hashTables[taskIndex];
-        //vector<vector<uint64_t>>& localResults = tmpResults[taskIndex];
         uint64_t* leftKeyColumn = localLeft[leftColId];
-    //    uint64_t* rightKeyColumn = localRight[rightColId];
+        if (cntBuilding) {
+            hashTablesCnt[taskIndex] = new unordered_map<uint64_t, uint64_t>();
+            unordered_map<uint64_t, uint64_t>* hashTable = hashTablesCnt[taskIndex];
 
-        //bloom_filter bloomFilter(bloomArgs);
-
-        // building
-        //hashTable.reserve(limitLeft);
-        hashTable->reserve(limitLeft*2);
-        for (uint64_t i=0; i<limitLeft; i++) {
-            hashTable->emplace(make_pair(leftKeyColumn[i],i));
-        //    bloomFilter.insert(leftKeyColumn[i]);
+            hashTable->reserve(limitLeft*2);
+            for (uint64_t i=0; i<limitLeft; i++) {
+                if (left->counted)
+                    (*hashTable)[leftKeyColumn[i]] += localLeft.back()[i]; 
+                else  
+                    (*hashTable)[leftKeyColumn[i]]++; 
+            }
+        } else {
+            hashTablesIndices[taskIndex] = new unordered_multimap<uint64_t, uint64_t>();
+            unordered_multimap<uint64_t, uint64_t>* hashTable = hashTablesIndices[taskIndex];
+            //vector<vector<uint64_t>>& localResults = tmpResults[taskIndex];
+            
+            hashTable->reserve(limitLeft*2);
+            for (uint64_t i=0; i<limitLeft; i++) {
+                hashTable->emplace(make_pair(leftKeyColumn[i],i));
+            //    bloomFilter.insert(leftKeyColumn[i]);
+            }
         }
     }
     unsigned cntTask = cntProbing[taskIndex]; 
@@ -741,11 +761,18 @@ void Join::probingTask(boost::asio::io_service* ioService, int partIndex, int ta
     unsigned leftColSize = requestedColumnsLeft.size();
     unsigned rightColSize = requestedColumnsRight.size();
     unsigned resultColSize = requestedColumns.size(); 
-    unordered_multimap<uint64_t, uint64_t>* hashTable = hashTables[partIndex];
+    unordered_map<uint64_t, uint64_t>* hashTableCnt = NULL;
+    unordered_multimap<uint64_t, uint64_t>* hashTableIndices = NULL;
     unordered_map<uint64_t, uint64_t> cntMap;
     
     if (leftLength == 0 || length == 0)
         goto probing_finish;
+    
+    if (cntBuilding) { 
+        hashTableCnt = hashTablesCnt[partIndex];
+    }else {
+        hashTableIndices = hashTablesIndices[partIndex];
+    }
     
     for (unsigned j=0; j<requestedColumns.size(); j++) {
         localResults.emplace_back();
@@ -768,40 +795,66 @@ void Join::probingTask(boost::asio::io_service* ioService, int partIndex, int ta
     
     if (leftLength > hashThreshold) {   
         // probing
-        for (uint64_t i=start; i<limit; i++) {
-            auto rightKey=rightKeyColumn[i];
-            /*
-            if (!bloomFilter.contains(rightKey))
-                continue;
-                */
-            auto range=hashTable->equal_range(rightKey);
-            for (auto iter=range.first;iter!=range.second;++iter) {
+        if (cntBuilding) {
+            for (uint64_t i=start; i<limit; i++) {
+                auto rightKey=rightKeyColumn[i];
+                if (hashTableCnt->find(rightKey) == hashTableCnt->end())
+                    continue;
+                uint64_t leftCnt = hashTableCnt->at(rightKey);
+                uint64_t rightCnt= right->counted ? copyRightData[rightColSize][i] : 1;
                 if (counted == 1){
-                    auto &copyData((leftColSize == 1) ? copyLeftData[0] : copyRightData[0]);
-                    auto rid = (leftColSize == 1) ? iter->second : i;
-                    auto dup = cntMap.find(copyData[rid]);
-                    uint64_t leftCnt = left->counted ? copyLeftData[leftColSize][iter->second] : 1;
-                    uint64_t rightCnt= right->counted ? copyRightData[rightColSize][i] : 1;
-                    if (dup != cntMap.end()){
-                        localResults[1][dup->second] += leftCnt * rightCnt;
-                    }
-                    else{
-                        localResults[0].push_back(copyData[rid]);
-                        localResults[1].push_back(leftCnt * rightCnt);
-                        cntMap.insert(dup, pair<uint64_t, uint64_t>(copyData[rid],
-                                    localResults[1].size()-1));
-                    }
-                }
-                else{
+                    auto data = (leftColSize == 1) ? rightKey : copyRightData[0][i];
+                    localResults[0].push_back(data);
+                    localResults[1].push_back(leftCnt*rightCnt);
+                
+                } else {
                     unsigned relColId=0;
-                    for (unsigned cId=0;cId<leftColSize;++cId)
-                        localResults[relColId++].push_back(copyLeftData[cId][iter->second]);
+                    for (unsigned cId=0;cId<leftColSize;++cId) // if exist
+                        localResults[relColId++].push_back(rightKey);
                     for (unsigned cId=0;cId<rightColSize;++cId)
                         localResults[relColId++].push_back(copyRightData[cId][i]);
                     if (counted){
+                        localResults[relColId].push_back(leftCnt * rightCnt);
+                    }
+                }
+                
+            }
+        } else {
+            for (uint64_t i=start; i<limit; i++) {
+                auto rightKey=rightKeyColumn[i];
+                /*
+                if (!bloomFilter.contains(rightKey))
+                    continue;
+                    */
+                auto range=hashTableIndices->equal_range(rightKey);
+                for (auto iter=range.first;iter!=range.second;++iter) {
+                    if (counted == 1){
+                        auto &copyData((leftColSize == 1) ? copyLeftData[0] : copyRightData[0]);
+                        auto rid = (leftColSize == 1) ? iter->second : i;
+                        auto dup = cntMap.find(copyData[rid]);
                         uint64_t leftCnt = left->counted ? copyLeftData[leftColSize][iter->second] : 1;
                         uint64_t rightCnt= right->counted ? copyRightData[rightColSize][i] : 1;
-                        localResults[relColId].push_back(leftCnt * rightCnt);
+                        if (dup != cntMap.end()){
+                            localResults[1][dup->second] += leftCnt * rightCnt;
+                        }
+                        else{
+                            localResults[0].push_back(copyData[rid]);
+                            localResults[1].push_back(leftCnt * rightCnt);
+                            cntMap.insert(dup, pair<uint64_t, uint64_t>(copyData[rid],
+                                        localResults[1].size()-1));
+                        }
+                    }
+                    else{
+                        unsigned relColId=0;
+                        for (unsigned cId=0;cId<leftColSize;++cId)
+                            localResults[relColId++].push_back(copyLeftData[cId][iter->second]);
+                        for (unsigned cId=0;cId<rightColSize;++cId)
+                            localResults[relColId++].push_back(copyRightData[cId][i]);
+                        if (counted){
+                            uint64_t leftCnt = left->counted ? copyLeftData[leftColSize][iter->second] : 1;
+                            uint64_t rightCnt= right->counted ? copyRightData[rightColSize][i] : 1;
+                            localResults[relColId].push_back(leftCnt * rightCnt);
+                        }
                     }
                 }
             }
