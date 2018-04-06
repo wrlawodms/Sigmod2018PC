@@ -112,5 +112,5 @@ void Relation::loadStat(unsigned colId)
     for (unsigned i = 0; i < size; i+=STAT_SAMPLE){
         cntSet.insert(c[i]);
     }
-    needCount[colId] = ((size / cntSet.size()) >= COUNT_THRESHOLD);
+    needCount[colId] = ((size / STAT_SAMPLE / cntSet.size()) >= COUNT_THRESHOLD);
 }

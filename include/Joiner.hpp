@@ -50,13 +50,13 @@ class Joiner {
     Joiner(int threadNum) : work(ioService) {
         asyncResults.reserve(100);
         asyncJoins.reserve(100);
-//        localMemPool = new MemoryPool*[THREAD_NUM];
+        localMemPool = new MemoryPool*[THREAD_NUM];
         
         for (int i=0; i<threadNum; i++) {
             threadPool.create_thread([&]() {
                     // cout << "Test" << endl;
                     tid = __sync_fetch_and_add(&nextTid, 1);
-//                    localMemPool[tid] = new MemoryPool(4*1024*1024*1024lu, 4096);
+                    localMemPool[tid] = new MemoryPool(4*1024*1024*1024lu, 4096);
                     ioService.run();
                 });
         }
@@ -92,10 +92,10 @@ class Joiner {
     ~Joiner() {
         ioService.stop();
         threadPool.join_all();
-//        for (int i=0; i<THREAD_NUM; i++) {
-//            delete localMemPool[i];
-//        }
-//        delete [] localMemPool;
+        for (int i=0; i<THREAD_NUM; i++) {
+            delete localMemPool[i];
+        }
+        delete [] localMemPool;
     }
     
 };

@@ -11,6 +11,9 @@
 //---------------------------------------------------------------------------
 using namespace std;
 
+#ifdef ANALYZE
+extern uint64_t cntCounted;
+#endif
 void Operator::finishAsyncRun(boost::asio::io_service& ioService, bool startParentAsync) {
     if (auto p = parent.lock()) {
         int pending = __sync_sub_and_fetch(&p->pendingAsyncOperator, 1);
@@ -132,6 +135,9 @@ void FilterScan::createAsyncTasks(boost::asio::io_service& ioService) {
             relation.needCount[select2ResultColId.begin()->first.colId]){
         // determine Count 
         counted = 1;
+#ifdef ANALYZE
+        __sync_fetch_and_add(&cntCounted, 1);
+#endif
         results.emplace_back(cntTask); // For Count Column
     }
 	for (int i=0; i<cntTask; i++) {
@@ -288,9 +294,16 @@ void Join::createAsyncTasks(boost::asio::io_service& ioService) {
         auto &sInfo(requestedColumnsLeft.size() == 1 ?
                 requestedColumnsLeft[0] : requestedColumnsRight[0]);
         counted = Joiner::relations[sInfo.relId].needCount[sInfo.colId];
+#ifdef ANALYZE
+        if (counted)
+            __sync_fetch_and_add(&cntCounted, 1);
+#endif
     }
     if ((left->counted || right->counted) && !counted){
         counted = 2;
+#ifdef ANALYZE
+        __sync_fetch_and_add(&cntCounted, 1);
+#endif
     }
     
     if (left->resultSize == 0) { // no reuslts
@@ -337,10 +350,10 @@ void Join::createAsyncTasks(boost::asio::io_service& ioService) {
     pendingPartitioning = 2;
 //    partitionTable[0] = (uint64_t*)malloc(left->getResultsSize());
 //    partitionTable[1] = (uint64_t*)malloc(right->getResultsSize());
-    partitionTable[0] = (uint64_t*)aligned_alloc(CACHE_LINE_SIZE, left->getResultsSize());
-    partitionTable[1] = (uint64_t*)aligned_alloc(CACHE_LINE_SIZE, right->getResultsSize());
-//    partitionTable[0] = (uint64_t*)localMemPool[tid]->alloc(left->getResultsSize());
-//    partitionTable[1] = (uint64_t*)localMemPool[tid]->alloc(right->getResultsSize());
+//    partitionTable[0] = (uint64_t*)aligned_alloc(CACHE_LINE_SIZE, left->getResultsSize());
+//    partitionTable[1] = (uint64_t*)aligned_alloc(CACHE_LINE_SIZE, right->getResultsSize());
+    partitionTable[0] = (uint64_t*)localMemPool[tid]->alloc(left->getResultsSize());
+    partitionTable[1] = (uint64_t*)localMemPool[tid]->alloc(right->getResultsSize());
     allocTid = tid; 
 /*
     if (left->getResultsSize() > 2*1024*1024) 
@@ -607,10 +620,10 @@ void Join::scatteringTask(boost::asio::io_service* ioService, int taskIndex, int
                     std::cerr << "Mempool(" << allocTid << ") free requested by " << tid << " addr: " << partitionTable[0] << ", " << partitionTable[1] << std::endl;
                 }
                 */
-                free(partitionTable[0]);
-                free(partitionTable[1]);
-//                localMemPool[allocTid]->requestFree(partitionTable[0]);
-//                localMemPool[allocTid]->requestFree(partitionTable[1]);
+//                free(partitionTable[0]);
+//                free(partitionTable[1]);
+                localMemPool[allocTid]->requestFree(partitionTable[0]);
+                localMemPool[allocTid]->requestFree(partitionTable[1]);
                 finishAsyncRun(*ioService, true); 
                 //left = nullptr;
                 //right = nullptr; 
@@ -869,10 +882,10 @@ probing_finish:
             std::cerr << "Mempool(" << allocTid << ") free requested by " << tid << " addr: " <<partitionTable[0] << ", " << partitionTable[1] << endl;
         }
         */
-        free(partitionTable[0]);
-        free(partitionTable[1]);
-//        localMemPool[allocTid]->requestFree(partitionTable[0]);
-//        localMemPool[allocTid]->requestFree(partitionTable[1]);
+//        free(partitionTable[0]);
+//        free(partitionTable[1]);
+        localMemPool[allocTid]->requestFree(partitionTable[0]);
+        localMemPool[allocTid]->requestFree(partitionTable[1]);
         finishAsyncRun(*ioService, true); 
         
         //left = nullptr;
@@ -1031,6 +1044,9 @@ void SelfJoin::createAsyncTasks(boost::asio::io_service& ioService) {
         copyData.emplace_back(&inputData.back());
     }
     if (counted){
+#ifdef ANALYZE
+        __sync_fetch_and_add(&cntCounted, 1);
+#endif
         results.emplace_back(cntTask);
     }
 

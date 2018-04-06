@@ -15,6 +15,9 @@ using namespace std;
 	}
 #endif
 
+#ifdef ANALYZE
+uint64_t cntCounted;
+#endif
 //---------------------------------------------------------------------------
 int main(int argc, char* argv[]) {
     Joiner joiner(THREAD_NUM);
@@ -57,7 +60,9 @@ int main(int argc, char* argv[]) {
         joiner.createAsyncQueryTask(line);
         //cout << joiner.join(i);
     }
-    cerr << cnt << endl; 
+#ifdef ANALYZE
+    cerr << "cntCounted : " << cntCounted << endl; 
+#endif
     //cerr << sum;
     return 0;
 }
