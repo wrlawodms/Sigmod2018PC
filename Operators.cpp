@@ -296,6 +296,14 @@ void Join::createAsyncTasks(boost::asio::io_service& ioService) {
         cntBuilding = true;
     }
 
+    
+    if (left->resultSize == 0) { // no reuslts
+        finishAsyncRun(ioService, true);
+        //left = nullptr;
+        //right = nullptr;
+        return;
+    }
+
     if (requestedColumnsLeft.size() + requestedColumnsRight.size() == 1){
         auto &sInfo(requestedColumnsLeft.size() == 1 ?
                 requestedColumnsLeft[0] : requestedColumnsRight[0]);
@@ -310,13 +318,6 @@ void Join::createAsyncTasks(boost::asio::io_service& ioService) {
 #ifdef ANALYZE
         __sync_fetch_and_add(&cntCounted, 1);
 #endif
-    }
-    
-    if (left->resultSize == 0) { // no reuslts
-        finishAsyncRun(ioService, true);
-        //left = nullptr;
-        //right = nullptr;
-        return;
     }
 
     leftColId=left->resolve(pInfo.left);
