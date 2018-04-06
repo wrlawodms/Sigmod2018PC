@@ -145,14 +145,12 @@ public:
 };
 //---------------------------------------------------------------------------
 class Join : public Operator {
-    /// bloom filter 
-    bloom_parameters bloomArgs;
     /// The input operators
     std::shared_ptr<Operator> left, right;
     /// The join predicate info
     PredicateInfo pInfo;
     /// tmpResults
-	std::vector<std::vector<std::vector<std::vector<uint64_t>>>> tmpResults; // [partition][probingTaskIndex][col][tuple]
+	std::vector<std::vector<std::vector<uint64_t>>> tmpResults; // [partition][col][tuple]
     /// Copy tuple to result
     void copy2Result(uint64_t leftId,uint64_t rightId);
     /// Create mapping for bindings
@@ -163,10 +161,8 @@ class Join : public Operator {
     int pendingScattering[2*CACHE_LINE_SIZE];// bug, CACHE_LINE_SIZE/4 enough
     int pendingPartitioning = -1;
     char pad2[CACHE_LINE_SIZE];
-    int pendingBuilding = -1;
+    int pendingSubjoin = -1;
     char pad3[CACHE_LINE_SIZE];
-    int pendingProbing = 0;
-    char pad4[CACHE_LINE_SIZE];
 
     // sequentially aloocated address for partitions, will be freed after materializing the result
     uint64_t* partitionTable[2] = {NULL, NULL};
@@ -193,16 +189,13 @@ class Join : public Operator {
     std::vector<std::vector<uint64_t>> histograms[2]; // [LR][taskIndex][partitionIndex], 각 파티션에 대한 벡터는 heap에 allocate되나? 안그럼 invalidate storㅇ이 일어날거 같은데
     std::vector<uint64_t> partitionLength[2]; // #tuples per each partition
 
-    std::vector<std::unordered_multimap<uint64_t, uint64_t>*> hashTablesIndices; // for using thread local storage 
-    std::vector<std::unordered_map<uint64_t, uint64_t>*> hashTablesCnt; // for using thread local storage 
     bool cntBuilding = false;
 
     void histogramTask(boost::asio::io_service* ioService, int cntTask, int taskIndex, int leftOrRight, uint64_t start, uint64_t length);
     void scatteringTask(boost::asio::io_service* ioService, int taskIndex, int leftOrRight, uint64_t start, uint64_t length); 
     // for cache, partition must be allocated sequentially 
     // void subJoinTask(boost::asio::io_service* ioService, int taskIndex, std::vector<uint64_t*> left, uint64_t leftLimit, std::vector<uint64_t*> right, uint64_t rightLimit);  
-    void buildingTask(boost::asio::io_service* ioService, int taskIndex, std::vector<uint64_t*> left, uint64_t leftLimit, std::vector<uint64_t*> right, uint64_t rightLimit);  
-    void probingTask(boost::asio::io_service* ioService, int partIndex, int taskIndex, std::vector<uint64_t*> left, uint64_t leftLength, std::vector<uint64_t*> right, uint64_t start, uint64_t length);  
+    void subjoinTask(boost::asio::io_service* ioService, int taskIndex, std::vector<uint64_t*> left, uint64_t leftLimit, std::vector<uint64_t*> right, uint64_t rightLimit);  
     
     /// Columns that have to be materialized
     std::unordered_set<SelectInfo> requestedColumns;
