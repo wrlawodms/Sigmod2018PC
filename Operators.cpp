@@ -58,11 +58,22 @@ void Scan::asyncRun(boost::asio::io_service& ioService) {
     cout << "Scan("<< queryIndex << "," << operatorIndex <<")::asyncRun, Task" << endl;
 #endif
     pendingAsyncOperator = 0;
-    for (int i=0; i<infos.size(); i++) {
-        results[i].addTuples(0, relation.columns[infos[i].colId], relation.size);
-        results[i].fix();
+    if (infos.size() == 1 && !relation.counted[infos[0].colId].empty()){
+        resultSize = relation.counted[infos[0].colId][1] - relation.counted[infos[0].colId][0];
+        results[0].addTuples(0, relation.counted[infos[0].colId][0], resultSize); //Count Column
+        results[0].fix();
+        results.emplace_back(1);
+        results[1].addTuples(0, relation.counted[infos[0].colId][1], resultSize); //Count Column
+        results[1].fix();
+        counted = 2;
     }
-    resultSize=relation.size; 
+    else{
+        for (int i=0; i<infos.size(); i++) {
+            results[i].addTuples(0, relation.columns[infos[i].colId], relation.size);
+            results[i].fix();
+        }
+        resultSize=relation.size; 
+    }
     finishAsyncRun(ioService, true);
 }
 //---------------------------------------------------------------------------
@@ -74,9 +85,9 @@ bool FilterScan::require(SelectInfo info)
     assert(info.colId<relation.columns.size());
     if (select2ResultColId.find(info)==select2ResultColId.end()) {
         // Add to results
-        inputData.push_back(relation.columns[info.colId]);
+        infos.push_back(info);
 //        tmpResults.emplace_back();
-        unsigned colId=inputData.size()-1;
+        unsigned colId=infos.size()-1;
         select2ResultColId[info]=colId;
     }
     return true;
@@ -85,7 +96,8 @@ bool FilterScan::require(SelectInfo info)
 bool FilterScan::applyFilter(uint64_t i,FilterInfo& f)
 // Apply filter
 {
-    auto compareCol=relation.columns[f.filterColumn.colId];
+    auto compareCol(counted == 2 ? relation.counted[f.filterColumn.colId][0] :
+            relation.columns[f.filterColumn.colId]);
     auto constant=f.constant;
     switch (f.comparison) {
         case FilterInfo::Comparison::Equal:
@@ -115,30 +127,52 @@ void FilterScan::createAsyncTasks(boost::asio::io_service& ioService) {
     //const uint64_t partitionSize = L2_SIZE/2;
     //const unsigned taskNum = CNT_PARTITIONS(relation.size*relation.columns.size()*8, partitionSize);
     int cntTask = THREAD_NUM;
-    uint64_t taskLength = relation.size/cntTask;
-    uint64_t rest = relation.size%cntTask;
+    uint64_t size = relation.size;
+    if (infos.size() == 1){
+        if (filters.size() == 1 && filters[0].filterColumn.colId == infos[0].colId &&
+                !relation.counted[infos[0].colId].empty()){
+            //Use pre-processed count Column
+            counted = 2;
+            size = relation.counted[infos[0].colId][1] - relation.counted[infos[0].colId][0];
+#ifdef ANALYZE
+            __sync_fetch_and_add(&cntCounted, 1);
+#endif
+        }
+        if (!counted && relation.needCount[infos[0].colId]){
+            counted = 1;
+#ifdef ANALYZE
+            __sync_fetch_and_add(&cntCounted, 1);
+#endif
+        }
+    }
+
+    uint64_t taskLength = size/cntTask;
+    uint64_t rest = size%cntTask;
     
     if (taskLength < minTuplesPerTask) {
-        cntTask = relation.size/minTuplesPerTask;
+        cntTask = size/minTuplesPerTask;
         if (cntTask == 0)
             cntTask = 1;
-        taskLength = relation.size/cntTask;
-        rest = relation.size%cntTask;
+        taskLength = size/cntTask;
+        rest = size%cntTask;
     }
     
     pendingTask = cntTask;
     
-    for (int i=0; i<inputData.size(); i++) {
-		results.emplace_back(cntTask);
+    if (counted == 2){
+        inputData.emplace_back(relation.counted[infos[0].colId][0]);
+        inputData.emplace_back(relation.counted[infos[0].colId][1]);
+        results.emplace_back(cntTask);
+        results.emplace_back(cntTask);
     }
-    if (inputData.size() == 1 &&
-            relation.needCount[select2ResultColId.begin()->first.colId]){
-        // determine Count 
-        counted = 1;
-#ifdef ANALYZE
-        __sync_fetch_and_add(&cntCounted, 1);
-#endif
-        results.emplace_back(cntTask); // For Count Column
+    else{
+        for (auto &sInfo : infos) {
+            inputData.emplace_back(relation.columns[sInfo.colId]);
+            results.emplace_back(cntTask);
+        }
+        if (counted){
+            results.emplace_back(cntTask);
+        }
     }
 	for (int i=0; i<cntTask; i++) {
 		tmpResults.emplace_back();
@@ -181,7 +215,7 @@ void FilterScan::filterTask(boost::asio::io_service* ioService, int taskIndex, u
                 break;
         }
         if (pass) {
-            if (counted){ // Only one Column will be used
+            if (counted == 1){ // Only one Column will be used
                 auto iter = cntMap.find(inputData[0][i]);
                 if (iter != cntMap.end()){
                     ++localResults[1][iter->second];
@@ -193,6 +227,7 @@ void FilterScan::filterTask(boost::asio::io_service* ioService, int taskIndex, u
                 }
             }
             else{
+                // If count == 2, colSize already contains count column
                 for (unsigned cId=0;cId<colSize;++cId)
                     localResults[cId].push_back(inputData[cId][i]);
             }
@@ -202,8 +237,8 @@ void FilterScan::filterTask(boost::asio::io_service* ioService, int taskIndex, u
     for (unsigned cId=0;cId<colSize;++cId) {
 		results[cId].addTuples(taskIndex, localResults[cId].data(), localResults[cId].size());
     }
-    if (counted){// Use calculated count column
-        results[colSize].addTuples(taskIndex, localResults[1].data(), localResults[1].size());
+    if (counted == 1){// Use calculated count column
+        results[1].addTuples(taskIndex, localResults[1].data(), localResults[1].size());
     }
     //resultSize += localResults[0].size();
 	__sync_fetch_and_add(&resultSize, localResults[0].size());
@@ -213,8 +248,8 @@ void FilterScan::filterTask(boost::asio::io_service* ioService, int taskIndex, u
         for (unsigned cId=0;cId<colSize;++cId) {
             results[cId].fix();
         }
-        if (counted){
-            results[colSize].fix();
+        if (counted == 1){
+            results[1].fix();
         }
         finishAsyncRun(*ioService, true);
     }

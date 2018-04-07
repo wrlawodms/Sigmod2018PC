@@ -17,6 +17,7 @@ public:
     uint64_t size;
     /// The join column containing the keys
     std::vector<uint64_t*> columns;
+    std::vector<std::vector<uint64_t*>> counted;
     std::vector<int> needCount;
 
     /// Stores a relation into a file (binary)
