@@ -129,8 +129,14 @@ void FilterScan::createAsyncTasks(boost::asio::io_service& ioService) {
     int cntTask = THREAD_NUM;
     uint64_t size = relation.size;
     if (infos.size() == 1){
-        if (filters.size() == 1 && filters[0].filterColumn.colId == infos[0].colId &&
-                !relation.counted[infos[0].colId].empty()){
+        bool pass = true;
+        for (auto &f:filters){
+            if (f.filterColumn.colId != infos[0].colId){
+                pass = false;
+                break;
+            }
+        }
+        if (pass && !relation.counted[infos[0].colId].empty()){
             //Use pre-processed count Column
             counted = 2;
             size = relation.counted[infos[0].colId][1] - relation.counted[infos[0].colId][0];
