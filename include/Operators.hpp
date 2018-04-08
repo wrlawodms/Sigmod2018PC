@@ -15,7 +15,6 @@
 #include "Parser.hpp"
 #include "Config.hpp"
 #include "Column.hpp"
-#include "bloom_filter.hpp"
 //#include "Joiner.hpp"
 
 class Joiner;
@@ -145,8 +144,6 @@ public:
 };
 //---------------------------------------------------------------------------
 class Join : public Operator {
-    /// bloom filter 
-    bloom_parameters bloomArgs;
     /// The input operators
     std::shared_ptr<Operator> left, right;
     /// The join predicate info
