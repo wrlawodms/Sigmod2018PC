@@ -1,6 +1,38 @@
-This file must contain information about the submission, including:
-  - team name
-  - for each team member: full name, e-mail, institution, department, and degree program
-  - advisor/supervisor name (if any)
-  - a brief description of the solution
-  - a list of the third party code used and their licenses
+- team name
+    PaperCup
+
+- for each team member:
+    full name, e-mail, institution, department, and degree program
+    
+    JaeeunKim, wrlawodms@gmail.com, Hanyang University, Computer Science, Persuing Master
+    HyeonseokOh, hyeonseok.ohh@gmail.com, Hanyang University, Computer Science, Persuing Master
+    HyunsooCho, hysoo.cho@gmail.com, Hanyang University, Computer Science, Undergraduate
+    KihwangKim, daktopia@gmail.com, Hanyang University, Computer Science, Undergraduate
+    
+- advisor/supervisor name (if any)
+    HyungsooJung, Hanyang University 
+    SooyongKang, Hanyang University
+
+- a brief description of the solution
+    1. Fully Task pool model
+        All tasks including parsing query and all operators are divided in small tasks and processed.
+        Cache size and cache locality are considered for dividing tasks.
+    2. Partitioning Hash join
+        Our main algorithm for solving this probmen is the  partitioning hash join algorithm, not the radix hash join.
+    3. Lock-free
+        There is no explicit lock or wait except the lock waiting for end of processing a batch queries.
+    4. MemoryPool
+        -Thread Local Buddy allocator
+    5. Query Optimization
+        1)Filter propagation
+        2)Filter first join order
+        3)Removing Redundant join operator
+        4)For duplicated Keys
+            -Add count column for it if needed.
+    6. Some optimization..
+
+- a list of the third party code used and their licenses
+    1. boost, Boost Software License
+    2. buddy, no license mentioned, https://github.com/cloudwu/buddy
+    3. tbb, Apache License 2.0
+

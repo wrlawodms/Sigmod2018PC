@@ -9,3 +9,5 @@ submission.tar.gz
 
 cachegrind.*
 perf.*
+testcase_generator
+workload
