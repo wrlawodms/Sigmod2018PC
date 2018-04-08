@@ -59,6 +59,7 @@ protected:
 
 public:
     int counted = 0; // 0 - no counting, 1 - make new counting, 2 - follow child op'counting
+    bool isStopped = false; // if ture, children can stop
 #ifdef VERBOSE
     unsigned operatorIndex;
     unsigned queryIndex;
@@ -79,7 +80,9 @@ public:
     virtual std::vector<Column<uint64_t>>& getResults();
     /// Get materialized results size in bytes
     virtual uint64_t getResultsSize();
-	// Print async info
+	/// stop all children 
+    virtual void stop() {isStopped = true; __sync_synchronize();}
+    // Print async info
 	virtual void printAsyncInfo() = 0;
     /// The result size
     uint64_t resultSize=0;
@@ -239,6 +242,15 @@ public:
     virtual void createAsyncTasks(boost::asio::io_service& ioService) override;
 	// Print async info
 	virtual void printAsyncInfo() override;
+	/// stop all children 
+    virtual void stop() {
+        isStopped = true;
+        __sync_synchronize();
+        if (!left->isStopped)
+            left->stop();
+        if (!right->isStopped)
+            right->stop(); 
+    }
 };
 //---------------------------------------------------------------------------
 class SelfJoin : public Operator {

@@ -11,11 +11,21 @@
 //---------------------------------------------------------------------------
 using namespace std;
 
+#ifdef ANALYZE_STOP
+uint64_t fsStopCnt = 0;
+uint64_t fsTaskStopCnt = 0;
+uint64_t joinStopCnt = 0;
+uint64_t scatteringStopCnt = 0;
+uint64_t probingStopCnt = 0;
+#endif
 #ifdef ANALYZE
 extern uint64_t cntCounted;
 #endif
 void Operator::finishAsyncRun(boost::asio::io_service& ioService, bool startParentAsync) {
+    isStopped = true;
     if (auto p = parent.lock()) {
+        if (resultSize == 0)
+            p->stop();
         int pending = __sync_sub_and_fetch(&p->pendingAsyncOperator, 1);
         assert(pending>=0);
 #ifdef VERBOSE
@@ -126,6 +136,15 @@ void FilterScan::createAsyncTasks(boost::asio::io_service& ioService) {
 #endif  
     //const uint64_t partitionSize = L2_SIZE/2;
     //const unsigned taskNum = CNT_PARTITIONS(relation.size*relation.columns.size()*8, partitionSize);
+    __sync_synchronize();
+    if (isStopped) {
+#ifdef ANALYZE_STOP
+        __sync_fetch_and_add(&fsStopCnt, 1);
+#endif
+//            cerr << "stop" << endl;
+        finishAsyncRun(ioService, true);
+        return;
+    }
     int cntTask = THREAD_NUM;
     uint64_t size = relation.size;
     if (infos.size() == 1){
@@ -200,6 +219,17 @@ void FilterScan::createAsyncTasks(boost::asio::io_service& ioService) {
 //---------------------------------------------------------------------------
 void FilterScan::filterTask(boost::asio::io_service* ioService, int taskIndex, uint64_t start, uint64_t length) {
     vector<vector<uint64_t>>& localResults = tmpResults[taskIndex];
+    unsigned colSize = inputData.size();
+    unordered_map<uint64_t, unsigned> cntMap;
+    
+    __sync_synchronize();
+    if (isStopped) {
+#ifdef ANALYZE_STOP
+        __sync_fetch_and_add(&fsTaskStopCnt, 1);
+#endif 
+//            cerr << "stop" << endl;
+        goto fs_finish;
+    }
     
     for (int j=0; j<inputData.size(); j++) {
         localResults.emplace_back();
@@ -212,8 +242,6 @@ void FilterScan::filterTask(boost::asio::io_service* ioService, int taskIndex, u
         localResults[cId].reserve(length);
     }*/
 
-    unsigned colSize = inputData.size();
-    unordered_map<uint64_t, unsigned> cntMap;
     for (uint64_t i=start;i<start+length;++i) {
         bool pass=true;
         for (auto& f : filters) {
@@ -246,9 +274,11 @@ void FilterScan::filterTask(boost::asio::io_service* ioService, int taskIndex, u
     if (counted == 1){// Use calculated count column
         results[1].addTuples(taskIndex, localResults[1].data(), localResults[1].size());
     }
+
     //resultSize += localResults[0].size();
 	__sync_fetch_and_add(&resultSize, localResults[0].size());
 
+fs_finish:
     int remainder = __sync_sub_and_fetch(&pendingTask, 1);
     if (remainder == 0) {
         for (unsigned cId=0;cId<colSize;++cId) {
@@ -314,6 +344,15 @@ void Join::createAsyncTasks(boost::asio::io_service& ioService) {
 #ifdef VERBOSE
     cout << "Join("<< queryIndex << "," << operatorIndex <<")::createAsyncTasks" << endl;
 #endif
+    __sync_synchronize();
+    if (isStopped) {
+#ifdef ANALYZE_STOP
+        __sync_fetch_and_add(&joinStopCnt, 1);
+#endif
+//            cerr << "stop" << endl;
+        finishAsyncRun(ioService, true);
+        return;
+    }
 
     if (left->resultSize>right->resultSize) {
         swap(left,right);
@@ -607,6 +646,17 @@ void Join::histogramTask(boost::asio::io_service* ioService, int cntTask, int ta
 void Join::scatteringTask(boost::asio::io_service* ioService, int taskIndex, int leftOrRight, uint64_t start, uint64_t length) {
     vector<Column<uint64_t>>& inputData = !leftOrRight ? left->getResults() : right->getResults();
     Column<uint64_t>& keyColumn = !leftOrRight ? inputData[leftColId] : inputData[rightColId];
+	auto keyIt = keyColumn.begin(start);
+	vector<Column<uint64_t>::Iterator> colIt;
+    vector<uint64_t> insertOffs;
+    __sync_synchronize();
+    if (isStopped) {
+#ifdef ANALYZE_STOP
+        __sync_fetch_and_add(&scatteringStopCnt, 1);
+#endif
+//            cerr << "stop" << endl;
+        goto scattering_finish;
+    }
     /*
 	uint64_t* keyColumn;
     vector<uint64_t*> inputData;
@@ -618,14 +668,11 @@ void Join::scatteringTask(boost::asio::io_service* ioService, int taskIndex, int
         keyColumn = inputData[rightColId];
     }*/
     // copy histogram for cache
-    vector<uint64_t> insertOffs;
     for (int i=0; i<cntPartition; i++) { 
         insertOffs.push_back(0);
     }
     //copyHist.insert(copyHist.end(), histograms[leftOrRight][taskIndex].begin(), histograms[leftOrRight][taskIndex].end());
     
-	auto keyIt = keyColumn.begin(start);
-	vector<Column<uint64_t>::Iterator> colIt;
 	
 	for (unsigned i=0; i<inputData.size(); i++) {
 		colIt.push_back(inputData[i].begin(start));
@@ -646,10 +693,16 @@ void Join::scatteringTask(boost::asio::io_service* ioService, int taskIndex, int
 			++(colIt[j]);
         }
     }
+
+scattering_finish:
     int remainder = __sync_sub_and_fetch(&pendingScattering[leftOrRight*CACHE_LINE_SIZE], 1);
     if (UNLIKELY(remainder == 0)) { 
         int remPart = __sync_sub_and_fetch(&pendingPartitioning, 1);
         if (remPart == 0) {
+            if (isStopped) {
+                finishAsyncRun(*ioService, true);
+                return;
+            }
             vector<unsigned> subJoinTarget;
             for (int i=0; i<cntPartition; i++) {
                 if (partitionLength[0][i] != 0 && partitionLength[1][i] != 0) {
@@ -710,7 +763,7 @@ void Join::buildingTask(boost::asio::io_service* ioService, int taskIndex, vecto
     // unordered_multimap<uint64_t, uint64_t>& hashTable = hashTables[taskIndex];
 //    shared_ptr<unordered_multimap<uint64_t, uint64_t>> hashTable = make_shared<unordered_multimap<uint64_t, uint64_t>>();
 
-    if (limitLeft > limitRight*2){
+//    if (limitLeft > limitRight*2){
 #if 0
         __sync_fetch_and_add(&cnt, 1);
 #endif
@@ -736,7 +789,7 @@ void Join::buildingTask(boost::asio::io_service* ioService, int taskIndex, vecto
         }
         cerr << "right min: " << min << " max: " << max << endl;
         */
-    }
+//    }
     if (limitLeft > hashThreshold) {
         uint64_t* leftKeyColumn = localLeft[leftColId];
         if (cntBuilding) {
@@ -806,6 +859,15 @@ void Join::probingTask(boost::asio::io_service* ioService, int partIndex, int ta
     unordered_map<uint64_t, uint64_t>* hashTableCnt = NULL;
     unordered_multimap<uint64_t, uint64_t>* hashTableIndices = NULL;
     unordered_map<uint64_t, uint64_t> cntMap;
+    
+    __sync_synchronize();
+    if (isStopped) {
+#ifdef ANALYZE_STOP
+        __sync_fetch_and_add(&probingStopCnt, 1);
+#endif
+//            cerr << "stop" << endl;
+        goto probing_finish;
+    }
     
     if (leftLength == 0 || length == 0)
         goto probing_finish;

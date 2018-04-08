@@ -18,6 +18,13 @@ using namespace std;
 #ifdef ANALYZE
 uint64_t cntCounted;
 #endif
+#ifdef ANALYZE_STOP
+extern uint64_t fsStopCnt;
+extern uint64_t fsTaskStopCnt;
+extern uint64_t joinStopCnt;
+extern uint64_t scatteringStopCnt;
+extern uint64_t probingStopCnt;
+#endif
 //---------------------------------------------------------------------------
 int main(int argc, char* argv[]) {
     Joiner joiner(THREAD_NUM);
@@ -62,6 +69,13 @@ int main(int argc, char* argv[]) {
     }
 #ifdef ANALYZE
     cerr << "cntCounted : " << cntCounted << endl; 
+#endif
+#ifdef ANALYZE_STOP
+    cerr << "fsStopCnt: " << fsStopCnt << endl;
+    cerr << "fsTaskStopCnt: " << fsTaskStopCnt << endl;
+    cerr << "joinStopCnt: " << joinStopCnt << endl;
+    cerr << "scatteringStopCnt: " << scatteringStopCnt << endl;
+    cerr << "probingStopCnt: " << probingStopCnt << endl;
 #endif
     //cerr << sum;
     return 0;
