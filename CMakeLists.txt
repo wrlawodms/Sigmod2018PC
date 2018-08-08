@@ -18,7 +18,7 @@ set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -g")
 include_directories(include)
 
 
-add_library(database Relation.cpp Operators.cpp Parser.cpp Utils.cpp Joiner.cpp)
+add_library(database Relation.cpp Operators.cpp Parser.cpp Utils.cpp Joiner.cpp MemoryPool.cpp buddy.cpp)
 target_include_directories(database PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
     $<INSTALL_INTERFACE:include>
@@ -29,7 +29,7 @@ if (CMAKE_BUILD_TYPE MATCHES "[Dd][Ee][Bb][Uu][Gg]" OR FORCE_TESTS)
 #add_subdirectory(test)
 endif()
 
-#link_directories(${CMAKE_SOURCE_DIR}/lib)
+link_directories(${CMAKE_SOURCE_DIR}/lib)
 
 add_executable(Driver main.cpp)
 target_link_libraries(Driver database boost_system boost_thread tbb pthread m stdc++ dl jemalloc)

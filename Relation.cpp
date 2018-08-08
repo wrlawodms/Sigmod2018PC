@@ -3,7 +3,11 @@
 #include <fstream>
 #include <sys/mman.h>
 #include <sys/stat.h>
+#include <algorithm>
+#include <unordered_set>
+#include <unordered_map>
 #include "Relation.hpp"
+#include "Config.hpp"
 //---------------------------------------------------------------------------
 using namespace std;
 //---------------------------------------------------------------------------
@@ -84,6 +88,8 @@ void Relation::loadRelation(const char* fileName)
         this->columns.push_back(reinterpret_cast<uint64_t*>(addr));
         addr+=size*sizeof(uint64_t);
     }
+    needCount.resize(numColumns, -1);
+    counted.resize(numColumns);
 }
 //---------------------------------------------------------------------------
 Relation::Relation(const char* fileName) : ownsMemory(false)
@@ -101,3 +107,29 @@ Relation::~Relation()
     }
 }
 //---------------------------------------------------------------------------
+void Relation::loadStat(unsigned colId)
+{
+    auto &c(columns[colId]);
+    unordered_set<uint64_t> cntSet;
+    const unsigned stat_sample = size/SAMPLING_CNT == 0 ? 1 : size/SAMPLING_CNT ;
+    for (unsigned i = 0; i < size; i+=stat_sample){
+        cntSet.insert(c[i]);
+    }
+    bool res = ((size / stat_sample / cntSet.size()) >= COUNT_THRESHOLD);
+    if (res){
+        unordered_map<uint64_t, uint64_t> cntMap;
+        for (unsigned i = 0; i < size; ++i){
+            ++cntMap[c[i]];
+        }
+        uint64_t sizep = 0;
+        uint64_t *vals= new uint64_t[cntMap.size() * 2];
+        uint64_t *cnts= vals + cntMap.size();
+        for (auto &it: cntMap){
+            vals[sizep] = it.first;
+            cnts[sizep++] = it.second;
+        }
+        counted[colId].emplace_back(vals);
+        counted[colId].emplace_back(cnts);
+    }
+    needCount[colId] = res;
+}

@@ -15,7 +15,6 @@
 #include "Parser.hpp"
 #include "Config.hpp"
 #include "Column.hpp"
-#include "bloom_filter.hpp"
 //#include "Joiner.hpp"
 
 class Joiner;
@@ -23,9 +22,22 @@ class Joiner;
 //---------------------------------------------------------------------------
 namespace std {
 /// Simple hash function to enable use with unordered_map
+
 template<> struct hash<SelectInfo> {
     std::size_t operator()(SelectInfo const& s) const noexcept { return s.binding ^ (s.colId << 5); }
 };
+/*
+struct myHash {
+    std::size_t operator()(uint64_t const& s) const noexcept { 
+        uint64_t x = s;
+        x = ((x >> 32) ^ x) * 0x45d9f3b;
+        x = ((x >> 32) ^ x) * 0x45d9f3b;
+        x = (x >> 32) ^ x;
+        return x; 
+    }
+};
+*/
+
 };
 //---------------------------------------------------------------------------
 class Operator {
@@ -46,6 +58,8 @@ protected:
     virtual void finishAsyncRun(boost::asio::io_service& ioService, bool startParentAsync=false); 
 
 public:
+    int counted = 0; // 0 - no counting, 1 - make new counting, 2 - follow child op'counting
+    bool isStopped = false; // if ture, children can stop
 #ifdef VERBOSE
     unsigned operatorIndex;
     unsigned queryIndex;
@@ -66,7 +80,9 @@ public:
     virtual std::vector<Column<uint64_t>>& getResults();
     /// Get materialized results size in bytes
     virtual uint64_t getResultsSize();
-	// Print async info
+	/// stop all children 
+    virtual void stop() {isStopped = true; __sync_synchronize();}
+    // Print async info
 	virtual void printAsyncInfo() = 0;
     /// The result size
     uint64_t resultSize=0;
@@ -109,7 +125,7 @@ class FilterScan : public Scan {
     /// for parallel
     int pendingTask = -1;
     
-    unsigned minTuplesPerTask = 100;
+    unsigned minTuplesPerTask = 1000;
 
     void filterTask(boost::asio::io_service* ioService, int taskIndex, uint64_t start, uint64_t length);
 public:
@@ -131,44 +147,63 @@ public:
 };
 //---------------------------------------------------------------------------
 class Join : public Operator {
-    /// bloom filter 
-    bloom_parameters bloomArgs;
     /// The input operators
     std::shared_ptr<Operator> left, right;
     /// The join predicate info
     PredicateInfo pInfo;
     /// tmpResults
-	std::vector<std::vector<std::vector<uint64_t>>> tmpResults; // [partition][col][tuple]
+	std::vector<std::vector<std::vector<std::vector<uint64_t>>>> tmpResults; // [partition][probingTaskIndex][col][tuple]
     /// Copy tuple to result
     void copy2Result(uint64_t leftId,uint64_t rightId);
     /// Create mapping for bindings
     void createMappingForBindings();
 
     char pad1[CACHE_LINE_SIZE];
-    int pendingMakingHistogram[2*CACHE_LINE_SIZE]; // = { -1, -1};
-    int pendingScattering[2*CACHE_LINE_SIZE];//  = {-1,-1};
+    int pendingMakingHistogram[2*CACHE_LINE_SIZE]; // bug
+    int pendingScattering[2*CACHE_LINE_SIZE];// bug, CACHE_LINE_SIZE/4 enough
     int pendingPartitioning = -1;
     char pad2[CACHE_LINE_SIZE];
-    int pendingSubjoin = -1;
+    int pendingBuilding = -1;
     char pad3[CACHE_LINE_SIZE];
+    int pendingProbing = 0;
+    char pad4[CACHE_LINE_SIZE];
 
     // sequentially aloocated address for partitions, will be freed after materializing the result
-    uint64_t* partitionTable[2];
-    const uint64_t partitionSize = L2_SIZE/16;
+    uint64_t* partitionTable[2] = {NULL, NULL};
+    int allocTid = -1;
+    const uint64_t partitionSize = L2_SIZE/8;
     uint64_t cntPartition;
+
+    const unsigned hashThreshold = 4; //left size가 넘으면 해쉬사용 안넘으면 단순 비교 
+
+
+    // variablse per partitions
+    std::vector<unsigned> cntProbing; // determined in histogramTask
+    std::vector<uint64_t> lengthProbing; 
+    std::vector<unsigned> restProbing;
+    std::vector<unsigned> resultIndex;
+    // std::vector<std::unordered_multimap<uint64_t, uint64_t>> hashTables;
+
 
     uint64_t taskLength[2];
     uint64_t taskRest[2];
-    const unsigned minTuplesPerTask = 200; // minimum part table size
+    const unsigned minTuplesPerTask = 100000; // minimum part table size
+//    const unsigned minTuplesPerProbing = 1000; // minimum part table size
 
     std::vector<std::vector<uint64_t*>> partition[2]; // just pointing partitionTable[], it is built after histogram, 각 파티션별 컬럼들의 위치를 포인팅  [LR][partition][column][tuple] P|C1sC2sC3s|P|C1sC2sC3s|...
     std::vector<std::vector<uint64_t>> histograms[2]; // [LR][taskIndex][partitionIndex], 각 파티션에 대한 벡터는 heap에 allocate되나? 안그럼 invalidate storㅇ이 일어날거 같은데
     std::vector<uint64_t> partitionLength[2]; // #tuples per each partition
 
+    std::vector<std::unordered_multimap<uint64_t, uint64_t>*> hashTablesIndices; // for using thread local storage 
+    std::vector<std::unordered_map<uint64_t, uint64_t>*> hashTablesCnt; // for using thread local storage 
+    bool cntBuilding = false;
+
     void histogramTask(boost::asio::io_service* ioService, int cntTask, int taskIndex, int leftOrRight, uint64_t start, uint64_t length);
     void scatteringTask(boost::asio::io_service* ioService, int taskIndex, int leftOrRight, uint64_t start, uint64_t length); 
     // for cache, partition must be allocated sequentially 
-    void subJoinTask(boost::asio::io_service* ioService, int taskIndex, std::vector<uint64_t*> left, uint64_t leftLimit, std::vector<uint64_t*> right, uint64_t rightLimit);  
+    // void subJoinTask(boost::asio::io_service* ioService, int taskIndex, std::vector<uint64_t*> left, uint64_t leftLimit, std::vector<uint64_t*> right, uint64_t rightLimit);  
+    void buildingTask(boost::asio::io_service* ioService, int taskIndex, std::vector<uint64_t*> left, uint64_t leftLimit, std::vector<uint64_t*> right, uint64_t rightLimit);  
+    void probingTask(boost::asio::io_service* ioService, int partIndex, int taskIndex, std::vector<uint64_t*> left, uint64_t leftLength, std::vector<uint64_t*> right, uint64_t start, uint64_t length);  
     
     /// Columns that have to be materialized
     std::unordered_set<SelectInfo> requestedColumns;
@@ -186,6 +221,19 @@ class Join : public Operator {
 public:
     /// The constructor
     Join(std::shared_ptr<Operator>& left,std::shared_ptr<Operator>& right,PredicateInfo pInfo) : left(left), right(right), pInfo(pInfo) {};
+    ~Join() {
+
+//        free(partitionTable[0]);
+//        free(partitionTable[1]);
+//        if (!hashTables.size())
+//            return;
+/*
+        for (unsigned i=0; i<cntPartition; i++) {
+            if(hashTables[i] != NULL)
+                delete hashTables[i];
+        }
+        */
+    }
     /// Require a column and add it to results
     bool require(SelectInfo info) override;
     /// AsyncRun
@@ -194,6 +242,15 @@ public:
     virtual void createAsyncTasks(boost::asio::io_service& ioService) override;
 	// Print async info
 	virtual void printAsyncInfo() override;
+	/// stop all children 
+    virtual void stop() {
+        isStopped = true;
+        __sync_synchronize();
+        if (!left->isStopped)
+            left->stop();
+        if (!right->isStopped)
+            right->stop(); 
+    }
 };
 //---------------------------------------------------------------------------
 class SelfJoin : public Operator {
@@ -211,7 +268,7 @@ class SelfJoin : public Operator {
     /// The input data that has to be copied
     std::vector<Column<uint64_t>*> copyData;
     int pendingTask = -1;
-    unsigned minTuplesPerTask = 100;
+    unsigned minTuplesPerTask = 1000;
     void selfJoinTask(boost::asio::io_service* ioService, int taskIndex, uint64_t start, uint64_t length);
 
 public:
@@ -237,7 +294,7 @@ class Checksum : public Operator {
     int queryIndex;
     
     int pendingTask = -1;
-    unsigned minTuplesPerTask = 100;
+    unsigned minTuplesPerTask = 1000;
     void checksumTask(boost::asio::io_service* ioService, int taskIndex, uint64_t start, uint64_t length);
 
 public:

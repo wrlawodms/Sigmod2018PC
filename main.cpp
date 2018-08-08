@@ -9,12 +9,22 @@ using namespace std;
 #ifdef MONITOR_ASYNC_JOIN
 	void monitorAsyncJoinThread(Joiner* joiner) {
 		while (true) {
-			usleep(1000);
+			usleep(1000000);
 			joiner->printAsyncJoinInfo();
 		}
 	}
 #endif
 
+#ifdef ANALYZE
+uint64_t cntCounted;
+#endif
+#ifdef ANALYZE_STOP
+extern uint64_t fsStopCnt;
+extern uint64_t fsTaskStopCnt;
+extern uint64_t joinStopCnt;
+extern uint64_t scatteringStopCnt;
+extern uint64_t probingStopCnt;
+#endif
 //---------------------------------------------------------------------------
 int main(int argc, char* argv[]) {
     Joiner joiner(THREAD_NUM);
@@ -24,6 +34,7 @@ int main(int argc, char* argv[]) {
         if (line == "Done") break;
         joiner.addRelation(line.c_str());
     }
+    joiner.loadStat();
     //chrono::steady_clock::time_point begin = chrono::steady_clock::now();
 
 /*    
@@ -43,7 +54,6 @@ int main(int argc, char* argv[]) {
 #ifdef MONITOR_ASYNC_JOIN
 	thread monitor(monitorAsyncJoinThread, &joiner);
 #endif
-    QueryInfo i;
     while (getline(cin, line)) {
         //if (line == "F") continue; // End of a batch
         if (line == "F") { // End of a batch
@@ -53,10 +63,20 @@ int main(int argc, char* argv[]) {
                 cout << result;
             continue;
         }
-        i.parseQuery(line);
-        joiner.createAsyncQueryTask(i);
+        //i.parseQuery(line);
+        joiner.createAsyncQueryTask(line);
         //cout << joiner.join(i);
     }
+#ifdef ANALYZE
+    cerr << "cntCounted : " << cntCounted << endl; 
+#endif
+#ifdef ANALYZE_STOP
+    cerr << "fsStopCnt: " << fsStopCnt << endl;
+    cerr << "fsTaskStopCnt: " << fsTaskStopCnt << endl;
+    cerr << "joinStopCnt: " << joinStopCnt << endl;
+    cerr << "scatteringStopCnt: " << scatteringStopCnt << endl;
+    cerr << "probingStopCnt: " << probingStopCnt << endl;
+#endif
     //cerr << sum;
     return 0;
 }
